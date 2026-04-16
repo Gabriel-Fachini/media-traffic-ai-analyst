@@ -1,6 +1,7 @@
 # Design Técnico e Arquitetura do MVP
 
 ## Visão Geral
+
 Este documento descreve as decisões arquiteturais para a implementação do Agente de IA responsável pela análise de tráfego do *thelook_ecommerce*. O foco principal é demonstrar **senioridade na organização do código e integração entre a inteligência do fluxo e a camada de banco de dados**, garantindo respostas baseadas em dados concretos (RAG via chamadas de funções direcionadas) sem complexidade acidental.
 
 ## 1. Arquitetura e Fluxo do LangGraph
@@ -9,8 +10,8 @@ Utilizaremos o **LangGraph** por oferecer suporte robusto a fluxos baseados em *
 
 ```mermaid
 graph TB
-    User[Usuário] -->|Pergunta Textual| UI[UI Interativa - Streamlit]
-    UI -->|POST /query| API[API - FastAPI]
+    User[Usuário] -->|Pergunta Textual| CLI[Interface CLI - Terminal]
+    CLI -->|POST /query| API[API - FastAPI]
     API --> GraphStart[Node: Start]
     
     GraphStart --> LLM[Node: Intention & Router]
@@ -31,6 +32,12 @@ graph TB
     Synthesize -->|Insights Formatos| API
     Fallback -->|Recusa Educada| API
 ```
+
+Decisao de escopo atual:
+
+- A interface oficial do MVP inicial sera via terminal/CLI.
+- Streamlit nao sera implementado nesta fase.
+- UI web fica como backlog de evolucao apos validacao manual do core (agentes + tools + API).
 
 ## 2. Modelos de Condução e API (Pydantic)
 
@@ -66,6 +73,7 @@ class QueryResponse(BaseModel):
 Para as duas ferramentas, a interface com o BigQuery Client utilizará **Parameterized Queries** para evitar injeções e falhas na string formatting. Abaixo as estruturas lógicas projetadas:
 
 ### 3.1. Query para Tool A (Volume de Tráfego)
+
 ```sql
 SELECT 
     traffic_source,
@@ -78,6 +86,7 @@ ORDER BY user_count DESC;
 ```
 
 ### 3.2. Query para Tool B (Performance Financeira de Canais)
+
 ```sql
 SELECT 
     u.traffic_source,

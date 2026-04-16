@@ -1,7 +1,10 @@
 # Relatório Oficial de Requisitos (MVP - AI Analyst)
 
 ## 1. Contexto do Projeto
+
 O sistema tem como principal alvo fornecer aos analistas de Performance e Growth um Agente Lógico Autônomo com interface humanizada. Seu objetivo é substituir queries repetitivas que cruzam o volume de usuários com as receitas dos canais (Facebook, Google, SEO) por uma interface amigável que atúe gerando relatórios simplificados.
+
+Nesta fase do MVP, a interacao com o agente sera realizada via terminal (CLI) para simplificar o desenvolvimento e a validacao manual. A camada de UI web (ex.: Streamlit) fica para evolucao futura.
 
 ## 2. Requisitos Funcionais de Aplicação (RFA)
 
@@ -15,6 +18,7 @@ O sistema tem como principal alvo fornecer aos analistas de Performance e Growth
 
 * **Stack Python:** Execução sobre a engine `Python 3.10+`.
 * **Framework Web:** O encapsulamento em API deve ser feito em `FastAPI`.
+* **Interface Inicial do MVP:** A interacao deve ser simples via terminal/CLI nesta fase. UI web nao e obrigatoria no MVP inicial.
 * **Orquestrador LLM:** Uso de motor como `LangGraph`, `LangChain` ou `LlamaIndex` para reger os prompts e histórico das invocações.
 * **Camada de Dados:** Queries executadas puramente utilizando o `google-cloud-bigquery` de forma padronizada via Prepared Statements para proteção contra Injection SQL.
 * **Organização de Código:** Código bem formatado obedecendo as boas práticas de Tipagem (Type Hinting) e validação (`Pydantic`).
