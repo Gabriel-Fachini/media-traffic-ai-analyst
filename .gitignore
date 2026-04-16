@@ -1,2 +1,9 @@
 .kiro
 .env
+.venv/
+__pycache__/
+*.pyc
+credentials/*
+!credentials/.gitkeep
+app/credentials/*.json
+credentials/*.json
