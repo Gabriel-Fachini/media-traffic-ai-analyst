@@ -7,3 +7,4 @@ credentials/*
 !credentials/.gitkeep
 app/credentials/*.json
 credentials/*.json
+.ruff_cache/

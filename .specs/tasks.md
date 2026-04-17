@@ -6,27 +6,27 @@
 
 **Foco:** Garantir estrutura do repositório, dependências, credenciais e a conexão com a base via pacote google oficial.
 
-- [ ] 1.1 Configurar o gerenciador de dependências (`poetry` sugerido) e carregar bibliotecas core (`fastapi`, `langgraph`, `google-cloud-bigquery`, `pydantic`).
-- [ ] 1.2 Criar um arquivo `.env` para carregar `GOOGLE_APPLICATION_CREDENTIALS` e `OPENAI_API_KEY`.
-- [ ] 1.3 Implementar `utils.config.py` para mapear variáveis de ambiente.
-- [ ] 1.4 Criar a classe `BigQueryClient` para instanciar a API e configurar testes manuais com queries fixas a fim de atestar o sucesso do acesso ao Dataset via service account.
+- [x] 1.1 Configurar o gerenciador de dependências (`poetry` sugerido) e carregar bibliotecas core (`fastapi`, `langgraph`, `google-cloud-bigquery`, `pydantic`).
+- [x] 1.2 Criar um arquivo `.env` para carregar `GOOGLE_APPLICATION_CREDENTIALS` e `OPENAI_API_KEY`.
+- [x] 1.3 Implementar `utils.config.py` para mapear variáveis de ambiente.
+- [x] 1.4 Criar a classe `BigQueryClient` para instanciar a API e configurar testes manuais com queries fixas a fim de atestar o sucesso do acesso ao Dataset via service account.
 
 ### Fase 2: Implementando Funções Essenciais (Tools Analytics)
 
 **Foco:** Fornecer os "braços" executores de consultas parametrizadas do BigQuery isoladas.
 
-- [ ] 2.1 Definir via Pydantic o modelo `Input` e de `Output` de cada tool, formatando as datas esperadas.
-- [ ] 2.2 Desenvolver a tool SQL Python `traffic_volume_analyzer`. (Envolve agregação simples de `users` e `traffic_source`).
-- [ ] 2.3 Desenvolver a tool SQL Python `channel_performance_analyzer`. (Fazendo o agrupamento robusto da `users`, `orders`, `order_items` por revenue de cada source de Marketing).
-- [ ] 2.4 Testar manualmente a extração destas views com queries simples e validação direta no terminal.
+- [x] 2.1 Definir via Pydantic o modelo `Input` e de `Output` de cada tool, formatando as datas esperadas.
+- [x] 2.2 Desenvolver a tool SQL Python `traffic_volume_analyzer`. (Envolve agregação simples de `users` e `traffic_source`).
+- [x] 2.3 Desenvolver a tool SQL Python `channel_performance_analyzer`. (Fazendo o agrupamento robusto da `users`, `orders`, `order_items` por revenue de cada source de Marketing).
+- [x] 2.4 Testar manualmente a extração destas views com queries simples e validação direta no terminal.
 
 ### Fase 3: Acessando e Orquestrando em Grafo
 
 **Foco:** Amarrar os conectores utilizando motor IA para orquestrar as ferramentas por inferência autônoma.
 
 - [ ] 3.1 Importar o LLM Node (GPT via Langchain/Langgraph bindings) e vincular a declaração de inputs das Tools (o `bind_tools()`).
-- [ ] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada).
-- [ ] 3.3 Escrever a instrução base (`SystemPrompt`) restritiva e moldar a inibição inteligente de negação de "Perguntas Fora de Escopo".
+- [ ] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada), com pedido de clarificação quando a pergunta vier sem `start_date` e `end_date`.
+- [ ] 3.3 Escrever a instrução base (`SystemPrompt`) restritiva, moldar a inibição inteligente de negação de "Perguntas Fora de Escopo" e apoiar o roteamento com um `schema_catalog` simples (tabelas, colunas e relacionamentos).
 - [ ] 3.4 Verificar se respostas de tabelas puras são ingeridas e retornadas corretamente pelo motor textual.
 
 ### Fase 4: O Serviço Web API
