@@ -1,0 +1,29 @@
+[project]
+name = "media-traffic-ai-analyst"
+version = "1.0.0"
+description = "MVP de analise de trafego e receita por canal com FastAPI, LangGraph e BigQuery"
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+authors = [{ name = "Gabriel Fachini" }]
+dependencies = [
+	"fastapi>=0.115.12,<0.116.0",
+	"uvicorn[standard]>=0.34.2,<0.35.0",
+	"pydantic>=2.11.3,<3.0.0",
+	"pydantic-settings>=2.9.1,<3.0.0",
+	"langgraph>=0.4.1,<0.5.0",
+	"google-cloud-bigquery>=3.31.0,<4.0.0",
+	"fastapi-cli>=0.0.24,<0.0.25",
+]
+
+[tool.poetry]
+packages = [{ include = "app" }]
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.11.6"
+
+[tool.fastapi]
+entrypoint = "app.main:app"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
