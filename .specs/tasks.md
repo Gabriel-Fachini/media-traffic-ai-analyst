@@ -17,8 +17,8 @@
 
 - [x] 2.1 Definir via Pydantic o modelo `Input` e de `Output` de cada tool, formatando as datas esperadas.
 - [x] 2.2 Desenvolver a tool SQL Python `traffic_volume_analyzer`. (Envolve agregação simples de `users` e `traffic_source`).
-- [ ] 2.3 Desenvolver a tool SQL Python `channel_performance_analyzer`. (Fazendo o agrupamento robusto da `users`, `orders`, `order_items` por revenue de cada source de Marketing).
-- [ ] 2.4 Testar manualmente a extração destas views com queries simples e validação direta no terminal.
+- [x] 2.3 Desenvolver a tool SQL Python `channel_performance_analyzer`. (Fazendo o agrupamento robusto da `users`, `orders`, `order_items` por revenue de cada source de Marketing).
+- [x] 2.4 Testar manualmente a extração destas views com queries simples e validação direta no terminal.
 
 ### Fase 3: Acessando e Orquestrando em Grafo
 
