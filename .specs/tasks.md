@@ -25,8 +25,8 @@
 **Foco:** Amarrar os conectores utilizando motor IA para orquestrar as ferramentas por inferência autônoma.
 
 - [ ] 3.1 Importar o LLM Node (GPT via Langchain/Langgraph bindings) e vincular a declaração de inputs das Tools (o `bind_tools()`).
-- [ ] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada).
-- [ ] 3.3 Escrever a instrução base (`SystemPrompt`) restritiva e moldar a inibição inteligente de negação de "Perguntas Fora de Escopo".
+- [ ] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada), com pedido de clarificação quando a pergunta vier sem `start_date` e `end_date`.
+- [ ] 3.3 Escrever a instrução base (`SystemPrompt`) restritiva, moldar a inibição inteligente de negação de "Perguntas Fora de Escopo" e apoiar o roteamento com um `schema_catalog` simples (tabelas, colunas e relacionamentos).
 - [ ] 3.4 Verificar se respostas de tabelas puras são ingeridas e retornadas corretamente pelo motor textual.
 
 ### Fase 4: O Serviço Web API

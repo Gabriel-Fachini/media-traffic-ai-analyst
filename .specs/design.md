@@ -38,12 +38,18 @@ Decisao de escopo atual:
 - A interface oficial do MVP inicial sera via terminal/CLI.
 - Streamlit nao sera implementado nesta fase.
 - UI web fica como backlog de evolucao apos validacao manual do core (agentes + tools + API).
+- As tools manterao `start_date` e `end_date` como campos obrigatorios.
+- Quando a pergunta chegar sem datas explicitas, o fluxo deve pedir clarificacao ao usuario antes de chamar qualquer tool.
 - O filtro das tools permanecera singular em `traffic_source` para manter o contrato simples no MVP.
+- Nao haverá `granularity` neste MVP inicial; as tools retornarao resultados agregados para o periodo informado.
+- Havera um `schema_catalog` simples apenas com tabelas, colunas e relacionamentos disponiveis na base.
 - Comparacoes entre canais devem ser resolvidas com uma consulta agregada por periodo e filtragem posterior na camada de sintese, sem ampliar o schema por enquanto.
 
 ## 2. Modelos de Condução e API (Pydantic)
 
 Uso forte de `Pydantic` nos Tools permite que o modelo faça o binding de argumentos formatados no JSON schema.
+
+Neste fluxo, o Router Agent e o primeiro no do grafo. Ele interpreta a pergunta do usuario, decide se a intencao e `traffic_volume`, `channel_performance` ou `out_of_scope`, extrai `traffic_source`, `start_date` e `end_date`, e somente depois encaminha a chamada para a tool adequada. Se as datas nao estiverem presentes na pergunta, o roteamento deve interromper a execucao e solicitar clarificacao.
 
 ```python
 from pydantic import BaseModel, Field
@@ -68,6 +74,30 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     tools_used: List[str]
+```
+
+### 2.1. Schema Catalog de Apoio
+
+Para manter o escopo simples e reduzir invencao de colunas ou joins inexistentes, o MVP tera um `schema_catalog` estatico de apoio ao roteamento e ao prompt base. Ele nao gera SQL dinamicamente e nao define semantica de negocio; apenas descreve a estrutura disponivel no dataset.
+
+Exemplo conceitual:
+
+```python
+SCHEMA_CATALOG = {
+    "users": {
+        "columns": ["id", "created_at", "traffic_source"],
+    },
+    "orders": {
+        "columns": ["order_id", "user_id", "created_at"],
+    },
+    "order_items": {
+        "columns": ["order_id", "sale_price"],
+    },
+    "relationships": [
+        "users.id = orders.user_id",
+        "orders.order_id = order_items.order_id",
+    ],
+}
 ```
 
 ## 3. Padrões de Queries SQL (BigQuery)
