@@ -45,35 +45,22 @@ class Settings(BaseSettings):
         cleaned = value.strip()
         return cleaned or None
 
-    def validate_required_environment(self) -> None:
-        missing_variables: list[str] = []
-
-        if not self.google_application_credentials:
-            missing_variables.append("GOOGLE_APPLICATION_CREDENTIALS")
-
+    def validate_environment(self) -> None:
         if not self.openai_api_key:
-            missing_variables.append("OPENAI_API_KEY")
-
-        if missing_variables:
-            missing_text = ", ".join(missing_variables)
             raise SettingsError(
-                f"Variaveis obrigatorias ausentes no .env: {missing_text}."
+                "Variavel obrigatoria ausente no ambiente: OPENAI_API_KEY."
             )
 
-        raw_credentials_path = self.google_application_credentials
-        if raw_credentials_path is None:
-            raise SettingsError(
-                "Variavel obrigatoria ausente no .env: GOOGLE_APPLICATION_CREDENTIALS."
+        if self.google_application_credentials:
+            credentials_path = (
+                Path(self.google_application_credentials).expanduser().resolve()
             )
-
-        credentials_path = Path(raw_credentials_path).expanduser().resolve()
-        if not credentials_path.is_file():
-            raise SettingsError(
-                "Arquivo de credenciais do GCP nao encontrado em "
-                f"{credentials_path}. Use caminho absoluto ou relativo ao diretorio atual."
-            )
-
-        self.google_application_credentials = str(credentials_path.resolve())
+            if not credentials_path.is_file():
+                raise SettingsError(
+                    "Arquivo de credenciais do GCP nao encontrado em "
+                    f"{credentials_path}. Verifique a configuracao no ambiente."
+                )
+            self.google_application_credentials = str(credentials_path.resolve())
 
     def apply_runtime_environment(self) -> None:
         if self.google_application_credentials:
@@ -88,6 +75,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    settings.validate_required_environment()
+    settings.validate_environment()
     settings.apply_runtime_environment()
     return settings

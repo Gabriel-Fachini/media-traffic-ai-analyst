@@ -55,9 +55,13 @@ poetry install
 
 ### 3) Configurar variaveis de ambiente
 
-O projeto inclui `.env.example` e `.env` inicial.
+O projeto inclui o arquivo `.env.example`. Copie-o para criar o seu `.env`:
 
-Edite o `.env` com seus valores reais:
+```bash
+cp .env.example .env
+```
+
+Edite o `.env` com seus valores reais (não versionado):
 
 ```env
 GCP_PROJECT_ID=seu-project-id
