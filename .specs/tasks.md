@@ -6,17 +6,17 @@
 
 **Foco:** Garantir estrutura do repositório, dependências, credenciais e a conexão com a base via pacote google oficial.
 
-- [ ] 1.1 Configurar o gerenciador de dependências (`poetry` sugerido) e carregar bibliotecas core (`fastapi`, `langgraph`, `google-cloud-bigquery`, `pydantic`).
-- [ ] 1.2 Criar um arquivo `.env` para carregar `GOOGLE_APPLICATION_CREDENTIALS` e `OPENAI_API_KEY`.
-- [ ] 1.3 Implementar `utils.config.py` para mapear variáveis de ambiente.
-- [ ] 1.4 Criar a classe `BigQueryClient` para instanciar a API e configurar testes manuais com queries fixas a fim de atestar o sucesso do acesso ao Dataset via service account.
+- [x] 1.1 Configurar o gerenciador de dependências (`poetry` sugerido) e carregar bibliotecas core (`fastapi`, `langgraph`, `google-cloud-bigquery`, `pydantic`).
+- [x] 1.2 Criar um arquivo `.env` para carregar `GOOGLE_APPLICATION_CREDENTIALS` e `OPENAI_API_KEY`.
+- [x] 1.3 Implementar `utils.config.py` para mapear variáveis de ambiente.
+- [x] 1.4 Criar a classe `BigQueryClient` para instanciar a API e configurar testes manuais com queries fixas a fim de atestar o sucesso do acesso ao Dataset via service account.
 
 ### Fase 2: Implementando Funções Essenciais (Tools Analytics)
 
 **Foco:** Fornecer os "braços" executores de consultas parametrizadas do BigQuery isoladas.
 
-- [ ] 2.1 Definir via Pydantic o modelo `Input` e de `Output` de cada tool, formatando as datas esperadas.
-- [ ] 2.2 Desenvolver a tool SQL Python `traffic_volume_analyzer`. (Envolve agregação simples de `users` e `traffic_source`).
+- [x] 2.1 Definir via Pydantic o modelo `Input` e de `Output` de cada tool, formatando as datas esperadas.
+- [x] 2.2 Desenvolver a tool SQL Python `traffic_volume_analyzer`. (Envolve agregação simples de `users` e `traffic_source`).
 - [ ] 2.3 Desenvolver a tool SQL Python `channel_performance_analyzer`. (Fazendo o agrupamento robusto da `users`, `orders`, `order_items` por revenue de cada source de Marketing).
 - [ ] 2.4 Testar manualmente a extração destas views com queries simples e validação direta no terminal.
 

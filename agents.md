@@ -216,3 +216,5 @@ Objetivo do uso:
 - Nao incluir estimativa ou controle de custos nesta fase (uso previsto em free tier).
 - Nao implementar testes automatizados no MVP inicial; validacao sera manual.
 - Nao implementar Streamlit/UI web nesta fase; interacao sera via terminal/CLI.
+- Manter `traffic_source` singular no contrato das tools durante o MVP.
+- Quando houver comparacao entre canais, preferir uma consulta agregada por periodo e comparar os canais na camada de sintese antes de ampliar o schema.

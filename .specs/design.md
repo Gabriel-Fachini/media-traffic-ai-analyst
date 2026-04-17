@@ -38,6 +38,8 @@ Decisao de escopo atual:
 - A interface oficial do MVP inicial sera via terminal/CLI.
 - Streamlit nao sera implementado nesta fase.
 - UI web fica como backlog de evolucao apos validacao manual do core (agentes + tools + API).
+- O filtro das tools permanecera singular em `traffic_source` para manter o contrato simples no MVP.
+- Comparacoes entre canais devem ser resolvidas com uma consulta agregada por periodo e filtragem posterior na camada de sintese, sem ampliar o schema por enquanto.
 
 ## 2. Modelos de Condução e API (Pydantic)
 
@@ -76,12 +78,15 @@ Para as duas ferramentas, a interface com o BigQuery Client utilizará **Paramet
 
 ```sql
 SELECT 
-    traffic_source,
+    COALESCE(traffic_source, 'Unknown') AS traffic_source,
     COUNT(DISTINCT id) as user_count
 FROM `bigquery-public-data.thelook_ecommerce.users`
-WHERE created_at BETWEEN @start_date AND @end_date
-  AND (@traffic_source IS NULL OR traffic_source = @traffic_source)
-GROUP BY traffic_source
+WHERE DATE(created_at) BETWEEN @start_date AND @end_date
+  AND (
+    @traffic_source IS NULL
+    OR LOWER(COALESCE(traffic_source, 'Unknown')) = LOWER(@traffic_source)
+  )
+GROUP BY COALESCE(traffic_source, 'Unknown')
 ORDER BY user_count DESC;
 ```
 
