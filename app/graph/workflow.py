@@ -319,6 +319,28 @@ def _get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
     return messages[bounded_start_index:]
 
 
+def _build_turn_question_messages(state: AnalyticsGraphState) -> list[HumanMessage]:
+    question = _resolve_question(state)
+    if not question:
+        return []
+
+    explicit_question = state.get("question", "").strip()
+    existing_messages = list(state.get("messages", []))
+    last_message = existing_messages[-1] if existing_messages else None
+
+    if explicit_question:
+        if isinstance(last_message, HumanMessage):
+            last_human_content = _content_to_text(last_message.content).strip()
+            if last_human_content == explicit_question:
+                return []
+        return [HumanMessage(content=explicit_question)]
+
+    if not existing_messages:
+        return [HumanMessage(content=question)]
+
+    return []
+
+
 def _collect_tools_used(messages: list[AnyMessage]) -> list[str]:
     seen: set[str] = set()
     tools_used: list[str] = []
@@ -366,8 +388,11 @@ def build_analytics_graph(
                 "turn_start_index": turn_start_index,
             }
 
+        injected_messages = _build_turn_question_messages(state)
+
         if _question_requests_unsupported_dimension(question):
             return {
+                "messages": injected_messages,
                 "final_answer": UNSUPPORTED_DIMENSION_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
@@ -377,6 +402,7 @@ def build_analytics_graph(
         valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
         if should_request_dates and invalid_dates:
             return {
+                "messages": injected_messages,
                 "final_answer": INVALID_DATES_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
@@ -384,6 +410,7 @@ def build_analytics_graph(
 
         if should_request_dates and len(valid_dates) < 2:
             return {
+                "messages": injected_messages,
                 "final_answer": MISSING_DATES_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
@@ -395,21 +422,8 @@ def build_analytics_graph(
         }
 
     def conversation_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        question = _resolve_question(state)
-        explicit_question = state.get("question", "").strip()
         existing_messages = list(state.get("messages", []))
-        injected_messages: list[AnyMessage] = []
-        last_message = existing_messages[-1] if existing_messages else None
-        last_message_matches_explicit_question = (
-            bool(explicit_question)
-            and isinstance(last_message, HumanMessage)
-            and _content_to_text(last_message.content).strip() == explicit_question
-        )
-
-        if explicit_question and not last_message_matches_explicit_question:
-            injected_messages.append(HumanMessage(content=explicit_question))
-        elif not existing_messages:
-            injected_messages.append(HumanMessage(content=question))
+        injected_messages = _build_turn_question_messages(state)
 
         if injected_messages:
             existing_messages = [*existing_messages, *injected_messages]
@@ -615,7 +629,15 @@ def invoke_analytics_graph(
     if thread_id:
         config = {"configurable": {"thread_id": thread_id}}
 
-    return cast(AnalyticsGraphState, resolved_graph.invoke({"question": question}, config=config))
+    input_state: AnalyticsGraphState = {
+        "question": question,
+        # Reset overwrite-style per-turn fields so resumed checkpoints do not
+        # leak the previous turn's answer or tool list into the current turn.
+        "final_answer": "",
+        "tools_used": [],
+    }
+
+    return cast(AnalyticsGraphState, resolved_graph.invoke(input_state, config=config))
 
 
 __all__ = [

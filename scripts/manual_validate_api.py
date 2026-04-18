@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.graph.llm import LlmTimeoutError
 from app.main import LLM_TIMEOUT_ERROR_MESSAGE, app, get_query_graph
 from app.schemas.api import QueryResponse
-from app.graph.workflow import MISSING_DATES_MESSAGE
+from app.graph.workflow import MISSING_DATES_MESSAGE, UNSUPPORTED_DIMENSION_MESSAGE
 
 
 ScenarioRunner = Callable[[TestClient], None]
@@ -74,6 +74,28 @@ def build_scenarios(*, show_body: bool) -> list[ValidationScenario]:
             name="thread-continuity",
             description="Valida persistencia basica de contexto via thread_id.",
             runner=lambda client: run_thread_continuity(client, show_body=show_body),
+        ),
+        ValidationScenario(
+            name="clarification-follow-up-dates-only",
+            description=(
+                "Valida que um follow-up so com datas reutiliza o contexto original "
+                "do thread_id."
+            ),
+            runner=lambda client: run_clarification_follow_up_dates_only(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="no-stale-final-answer-after-short-circuit",
+            description=(
+                "Valida que respostas transitórias do turno anterior nao vazam "
+                "para um novo short-circuit no mesmo thread_id."
+            ),
+            runner=lambda client: run_no_stale_final_answer_after_short_circuit(
+                client,
+                show_body=show_body,
+            ),
         ),
         ValidationScenario(
             name="llm-timeout",
@@ -310,6 +332,168 @@ def run_thread_continuity(client: TestClient, *, show_body: bool) -> None:
         )
     print_check(
         "contexto cresceu entre chamadas: "
+        f"{first_body.metadata.context_message_count} -> "
+        f"{second_body.metadata.context_message_count}"
+    )
+
+
+def run_clarification_follow_up_dates_only(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Qual foi a receita de Search?",
+    }
+    print_step("Primeira chamada sem datas para abrir clarificacao")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if first_body.answer != MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A primeira chamada deveria retornar a mensagem de clarificacao de datas. "
+            f"Recebido={first_body.answer!r}"
+        )
+    print_check("primeira chamada retornou a clarificacao esperada")
+    if first_body.metadata is None:
+        raise AssertionError("Metadata ausente na primeira chamada de clarificacao.")
+    if first_body.metadata.thread_id != thread_id:
+        raise AssertionError("A primeira chamada nao preservou o thread_id informado.")
+    print_check("primeira chamada preservou o thread_id informado")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "Entre 2024-01-01 e 2024-01-31.",
+    }
+    print_step("Segunda chamada enviando apenas as datas no mesmo thread_id")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post("/query", json=second_payload)
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+
+    if second_body.metadata is None:
+        raise AssertionError("Metadata ausente na segunda chamada de follow-up.")
+    if second_body.metadata.thread_id != thread_id:
+        raise AssertionError("A segunda chamada nao preservou o thread_id informado.")
+    print_check("segunda chamada preservou o thread_id informado")
+    if (
+        second_body.metadata.context_message_count
+        <= first_body.metadata.context_message_count
+    ):
+        raise AssertionError(
+            "O contexto nao cresceu apos o follow-up so com datas. "
+            f"Primeira={first_body.metadata.context_message_count}, "
+            f"segunda={second_body.metadata.context_message_count}"
+        )
+    print_check(
+        "contexto cresceu entre clarificacao e follow-up: "
+        f"{first_body.metadata.context_message_count} -> "
+        f"{second_body.metadata.context_message_count}"
+    )
+    if second_body.answer == MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A segunda chamada repetiu a mensagem de clarificacao, indicando que o "
+            "contexto original nao foi reutilizado."
+        )
+    print_check("segunda chamada nao repetiu a mensagem antiga de clarificacao")
+    if "channel_performance_analyzer" not in second_body.tools_used:
+        raise AssertionError(
+            "O follow-up so com datas deveria reutilizar a pergunta original e "
+            "acionar channel_performance_analyzer. "
+            f"Recebido={second_body.tools_used}"
+        )
+    print_check("follow-up acionou channel_performance_analyzer")
+    if not second_body.answer.strip():
+        raise AssertionError("A resposta final do follow-up veio vazia.")
+    print_check("follow-up retornou resposta final nao vazia")
+
+
+def run_no_stale_final_answer_after_short_circuit(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Qual foi a receita de Search?",
+    }
+    print_step("Primeira chamada sem datas para persistir um short-circuit")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if first_body.answer != MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A primeira chamada deveria retornar a mensagem de clarificacao de datas. "
+            f"Recebido={first_body.answer!r}"
+        )
+    print_check("primeira chamada retornou a clarificacao esperada")
+    if first_body.metadata is None:
+        raise AssertionError("Metadata ausente na primeira chamada de short-circuit.")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": (
+            "Qual foi a receita por campanha entre 2024-01-01 e 2024-01-31?"
+        ),
+    }
+    print_step("Segunda chamada faz novo short-circuit no mesmo thread_id")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post("/query", json=second_payload)
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+
+    if second_body.answer != UNSUPPORTED_DIMENSION_MESSAGE:
+        raise AssertionError(
+            "A segunda chamada deveria retornar a mensagem de dimensao nao "
+            "suportada, sem reaproveitar a resposta do turno anterior. "
+            f"Recebido={second_body.answer!r}"
+        )
+    print_check("segunda chamada retornou a mensagem nova esperada")
+    if second_body.answer == first_body.answer:
+        raise AssertionError(
+            "A segunda chamada repetiu a resposta da primeira, indicando vazamento "
+            "de final_answer persistido entre turnos."
+        )
+    print_check("segunda chamada nao reutilizou o final_answer anterior")
+    if second_body.tools_used:
+        raise AssertionError(
+            "Nenhuma tool deveria ser usada em um short-circuit por dimensao nao "
+            f"suportada. Recebido={second_body.tools_used}"
+        )
+    print_check("tools_used veio vazio no segundo short-circuit")
+    if second_body.metadata is None:
+        raise AssertionError("Metadata ausente na segunda chamada de short-circuit.")
+    if second_body.metadata.thread_id != thread_id:
+        raise AssertionError("A segunda chamada nao preservou o thread_id informado.")
+    print_check("segunda chamada preservou o thread_id informado")
+    if (
+        second_body.metadata.context_message_count
+        <= first_body.metadata.context_message_count
+    ):
+        raise AssertionError(
+            "O contexto nao cresceu entre os dois short-circuits no mesmo thread_id. "
+            f"Primeira={first_body.metadata.context_message_count}, "
+            f"segunda={second_body.metadata.context_message_count}"
+        )
+    print_check(
+        "contexto cresceu entre os dois short-circuits: "
         f"{first_body.metadata.context_message_count} -> "
         f"{second_body.metadata.context_message_count}"
     )
