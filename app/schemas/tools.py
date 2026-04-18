@@ -16,8 +16,12 @@ from pydantic import (
 class DateRangeInput(BaseModel):
     """Shared date range for analytics tools."""
 
-    start_date: date = Field(description="Data inicial no formato YYYY-MM-DD.")
-    end_date: date = Field(description="Data final no formato YYYY-MM-DD.")
+    start_date: date = Field(
+        description="Data inicial obrigatoria no formato YYYY-MM-DD, sem horario."
+    )
+    end_date: date = Field(
+        description="Data final obrigatoria no formato YYYY-MM-DD, sem horario."
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -47,7 +51,10 @@ class ToolInputBase(DateRangeInput):
 
     traffic_source: str | None = Field(
         default=None,
-        description="Filtro opcional por um canal de trafego.",
+        description=(
+            "Filtro opcional por um unico canal de trafego, por exemplo Search, "
+            "Organic ou Facebook. Nao envie lista de canais."
+        ),
     )
 
     @field_validator("traffic_source", mode="before")
