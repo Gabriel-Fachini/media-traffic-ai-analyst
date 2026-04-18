@@ -27,7 +27,7 @@
 - [x] 3.1 Importar o LLM Node (GPT via Langchain/Langgraph bindings) e vincular a declaração de inputs das Tools (o `bind_tools()`).
 - [x] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada), com pedido de clarificação quando a pergunta vier sem `start_date` e `end_date`. Nesta etapa, o foco é a estrutura do grafo e o caminho de clarificação; a continuidade multi-turn entre invocações será conectada quando o grafo for integrado à API/CLI.
 - [x] 3.3 Escrever a instrução base (`SystemPrompt`) restritiva, moldar a inibição inteligente de negação de "Perguntas Fora de Escopo" e apoiar o roteamento com um `schema_catalog` simples (tabelas, colunas e relacionamentos).
-- [ ] 3.4 Verificar se respostas de tabelas puras são ingeridas e retornadas corretamente pelo motor textual.
+- [x] 3.4 Verificar se respostas de tabelas puras são ingeridas e retornadas corretamente pelo motor textual.
 
 ### Fase 4: O Serviço Web API
 
