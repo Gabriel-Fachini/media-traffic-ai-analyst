@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import json
 import re
 import unicodedata
@@ -25,6 +26,9 @@ from app.graph.tools import get_analytics_tools
 from app.utils.config import Settings
 
 DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+DIMENSION_REQUEST_PATTERN = re.compile(
+    r"\b(?:por|by|per)\s+([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\b"
+)
 QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
 SUPPORTED_CHANNEL_TOKENS = frozenset(
     {
@@ -72,6 +76,23 @@ SUPPORTED_SOURCE_TOKENS = frozenset(
         "instagram",
     }
 )
+SUPPORTED_ANALYTICS_DIMENSION_TOKENS = frozenset(
+    {
+        "canal",
+        "canais",
+        "channel",
+        "channels",
+        "origem",
+        "origens",
+        "source",
+        "sources",
+        "traffic_source",
+        "search",
+        "organic",
+        "facebook",
+        "instagram",
+    }
+)
 UNSUPPORTED_METRIC_TOKENS = frozenset(
     {
         "cac",
@@ -112,6 +133,15 @@ MISSING_DATES_MESSAGE = (
     "Preciso que voce informe start_date e end_date no formato YYYY-MM-DD para eu "
     "consultar os dados. Exemplo: 2024-01-01 ate 2024-01-31."
 )
+INVALID_DATES_MESSAGE = (
+    "As datas informadas sao invalidas. Use start_date e end_date reais no formato "
+    "YYYY-MM-DD, por exemplo 2024-01-01 ate 2024-01-31."
+)
+UNSUPPORTED_DIMENSION_MESSAGE = (
+    "No MVP atual eu so consigo analisar trafego, pedidos e receita por canal "
+    "(traffic_source). Reformule a pergunta nesse escopo e, quando a consulta "
+    "depender de dados, informe start_date e end_date em YYYY-MM-DD."
+)
 EMPTY_QUESTION_MESSAGE = (
     "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."
 )
@@ -127,6 +157,7 @@ class AnalyticsGraphState(TypedDict, total=False):
     question: str
     messages: Annotated[list[AnyMessage], add_messages]
     next_step: Literal["conversation", "tools", "final_response"]
+    turn_start_index: int
     final_answer: str
     tools_used: list[str]
 
@@ -179,8 +210,42 @@ def _extract_iso_dates(question: str) -> list[str]:
     return DATE_TOKEN_PATTERN.findall(question)
 
 
+def _extract_requested_dimensions(question: str) -> list[str]:
+    normalized_question = _normalize_text(question)
+    return [
+        requested_dimension.strip().replace(" ", "_")
+        for requested_dimension in DIMENSION_REQUEST_PATTERN.findall(normalized_question)
+    ]
+
+
+def _extract_valid_and_invalid_iso_dates(
+    question: str,
+) -> tuple[list[date], list[str]]:
+    valid_dates: list[date] = []
+    invalid_dates: list[str] = []
+
+    for date_token in _extract_iso_dates(question):
+        try:
+            valid_dates.append(date.fromisoformat(date_token))
+        except ValueError:
+            invalid_dates.append(date_token)
+
+    return valid_dates, invalid_dates
+
+
 def _extract_question_tokens(question: str) -> set[str]:
     return set(QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)))
+
+
+def _question_requests_unsupported_dimension(question: str) -> bool:
+    requested_dimensions = _extract_requested_dimensions(question)
+    if not requested_dimensions:
+        return False
+
+    return any(
+        requested_dimension not in SUPPORTED_ANALYTICS_DIMENSION_TOKENS
+        for requested_dimension in requested_dimensions
+    )
 
 
 def _question_supports_date_clarification(question: str) -> bool:
@@ -189,6 +254,9 @@ def _question_supports_date_clarification(question: str) -> bool:
         return False
 
     if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    if _question_requests_unsupported_dimension(question):
         return False
 
     has_performance_metric = bool(
@@ -214,15 +282,33 @@ def _get_last_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
     return None
 
 
-def _get_last_human_message(messages: list[AnyMessage]) -> HumanMessage | None:
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            return message
-    return None
-
-
 def _collect_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
     return [message for message in messages if isinstance(message, ToolMessage)]
+
+
+def _resolve_turn_start_index(state: AnalyticsGraphState) -> int:
+    messages = list(state.get("messages", []))
+    explicit_question = state.get("question", "").strip()
+
+    if explicit_question:
+        if messages and isinstance(messages[-1], HumanMessage):
+            last_human_content = _content_to_text(messages[-1].content).strip()
+            if last_human_content == explicit_question:
+                return len(messages) - 1
+        return len(messages)
+
+    for index in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[index], HumanMessage):
+            return index
+
+    return len(messages)
+
+
+def _get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
+    messages = list(state.get("messages", []))
+    turn_start_index = state.get("turn_start_index", _resolve_turn_start_index(state))
+    bounded_start_index = max(0, min(turn_start_index, len(messages)))
+    return messages[bounded_start_index:]
 
 
 def _collect_tools_used(messages: list[AnyMessage]) -> list[str]:
@@ -263,34 +349,55 @@ def build_analytics_graph(
 
     def router_node(state: AnalyticsGraphState) -> dict[str, Any]:
         question = _resolve_question(state)
+        turn_start_index = _resolve_turn_start_index(state)
         if not question:
             return {
                 "final_answer": EMPTY_QUESTION_MESSAGE,
                 "next_step": "final_response",
+                "turn_start_index": turn_start_index,
             }
 
-        if (
-            _question_supports_date_clarification(question)
-            and len(_extract_iso_dates(question)) < 2
-        ):
+        if _question_requests_unsupported_dimension(question):
+            return {
+                "final_answer": UNSUPPORTED_DIMENSION_MESSAGE,
+                "next_step": "final_response",
+                "turn_start_index": turn_start_index,
+            }
+
+        should_request_dates = _question_supports_date_clarification(question)
+        valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
+        if should_request_dates and invalid_dates:
+            return {
+                "final_answer": INVALID_DATES_MESSAGE,
+                "next_step": "final_response",
+                "turn_start_index": turn_start_index,
+            }
+
+        if should_request_dates and len(valid_dates) < 2:
             return {
                 "final_answer": MISSING_DATES_MESSAGE,
                 "next_step": "final_response",
+                "turn_start_index": turn_start_index,
             }
 
-        return {"next_step": "conversation"}
+        return {
+            "next_step": "conversation",
+            "turn_start_index": turn_start_index,
+        }
 
     def conversation_node(state: AnalyticsGraphState) -> dict[str, Any]:
         question = _resolve_question(state)
         explicit_question = state.get("question", "").strip()
         existing_messages = list(state.get("messages", []))
         injected_messages: list[AnyMessage] = []
+        last_message = existing_messages[-1] if existing_messages else None
+        last_message_matches_explicit_question = (
+            bool(explicit_question)
+            and isinstance(last_message, HumanMessage)
+            and _content_to_text(last_message.content).strip() == explicit_question
+        )
 
-        last_human_message = _get_last_human_message(existing_messages)
-        if explicit_question and (
-            last_human_message is None
-            or _content_to_text(last_human_message.content).strip() != explicit_question
-        ):
+        if explicit_question and not last_message_matches_explicit_question:
             injected_messages.append(HumanMessage(content=explicit_question))
         elif not existing_messages:
             injected_messages.append(HumanMessage(content=question))
@@ -360,10 +467,10 @@ def build_analytics_graph(
         return {"messages": tool_messages}
 
     def final_response_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        messages = list(state.get("messages", []))
-        tools_used = _collect_tools_used(messages)
+        current_turn_messages = _get_current_turn_messages(state)
+        tools_used = _collect_tools_used(current_turn_messages)
         preset_answer = state.get("final_answer")
-        tool_messages = _collect_tool_messages(messages)
+        tool_messages = _collect_tool_messages(current_turn_messages)
 
         if preset_answer and not tool_messages:
             return {
@@ -410,7 +517,7 @@ def build_analytics_graph(
                 "tools_used": tools_used,
             }
 
-        last_ai_message = _get_last_ai_message(messages)
+        last_ai_message = _get_last_ai_message(current_turn_messages)
         if last_ai_message is None:
             return {
                 "final_answer": EMPTY_QUESTION_MESSAGE,
@@ -477,9 +584,11 @@ def invoke_analytics_graph(
 
 __all__ = [
     "AnalyticsGraphState",
+    "INVALID_DATES_MESSAGE",
     "MISSING_DATES_MESSAGE",
     "TEMPORARY_LLM_FAILURE_MESSAGE",
     "TEMPORARY_TOOL_FAILURE_MESSAGE",
+    "UNSUPPORTED_DIMENSION_MESSAGE",
     "build_analytics_graph",
     "invoke_analytics_graph",
 ]
