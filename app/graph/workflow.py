@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from functools import lru_cache
 import json
 import re
 import unicodedata
@@ -14,16 +15,23 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from app.graph.llm import build_analytics_llm, build_tool_enabled_llm
+from app.graph.llm import (
+    LlmTimeoutError,
+    build_analytics_llm,
+    build_tool_enabled_llm,
+    is_llm_timeout_error,
+)
 from app.graph.prompts import (
     FINAL_RESPONSE_SYSTEM_PROMPT,
     build_conversation_system_prompt,
 )
 from app.graph.tools import get_analytics_tools
-from app.utils.config import Settings
+from app.utils.config import Settings, get_settings
 
 DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 DIMENSION_REQUEST_PATTERN = re.compile(
@@ -311,6 +319,28 @@ def _get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
     return messages[bounded_start_index:]
 
 
+def _build_turn_question_messages(state: AnalyticsGraphState) -> list[HumanMessage]:
+    question = _resolve_question(state)
+    if not question:
+        return []
+
+    explicit_question = state.get("question", "").strip()
+    existing_messages = list(state.get("messages", []))
+    last_message = existing_messages[-1] if existing_messages else None
+
+    if explicit_question:
+        if isinstance(last_message, HumanMessage):
+            last_human_content = _content_to_text(last_message.content).strip()
+            if last_human_content == explicit_question:
+                return []
+        return [HumanMessage(content=explicit_question)]
+
+    if not existing_messages:
+        return [HumanMessage(content=question)]
+
+    return []
+
+
 def _collect_tools_used(messages: list[AnyMessage]) -> list[str]:
     seen: set[str] = set()
     tools_used: list[str] = []
@@ -340,6 +370,7 @@ def build_analytics_graph(
     tool_enabled_llm: Any | None = None,
     response_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
+    checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
     tools_by_name = {tool.name: tool for tool in analytics_tools}
@@ -357,8 +388,11 @@ def build_analytics_graph(
                 "turn_start_index": turn_start_index,
             }
 
+        injected_messages = _build_turn_question_messages(state)
+
         if _question_requests_unsupported_dimension(question):
             return {
+                "messages": injected_messages,
                 "final_answer": UNSUPPORTED_DIMENSION_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
@@ -368,6 +402,7 @@ def build_analytics_graph(
         valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
         if should_request_dates and invalid_dates:
             return {
+                "messages": injected_messages,
                 "final_answer": INVALID_DATES_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
@@ -375,6 +410,7 @@ def build_analytics_graph(
 
         if should_request_dates and len(valid_dates) < 2:
             return {
+                "messages": injected_messages,
                 "final_answer": MISSING_DATES_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
@@ -386,21 +422,8 @@ def build_analytics_graph(
         }
 
     def conversation_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        question = _resolve_question(state)
-        explicit_question = state.get("question", "").strip()
         existing_messages = list(state.get("messages", []))
-        injected_messages: list[AnyMessage] = []
-        last_message = existing_messages[-1] if existing_messages else None
-        last_message_matches_explicit_question = (
-            bool(explicit_question)
-            and isinstance(last_message, HumanMessage)
-            and _content_to_text(last_message.content).strip() == explicit_question
-        )
-
-        if explicit_question and not last_message_matches_explicit_question:
-            injected_messages.append(HumanMessage(content=explicit_question))
-        elif not existing_messages:
-            injected_messages.append(HumanMessage(content=question))
+        injected_messages = _build_turn_question_messages(state)
 
         if injected_messages:
             existing_messages = [*existing_messages, *injected_messages]
@@ -412,7 +435,9 @@ def build_analytics_graph(
                     [SystemMessage(content=conversation_system_prompt), *existing_messages]
                 ),
             )
-        except Exception:
+        except Exception as exc:
+            if is_llm_timeout_error(exc):
+                raise LlmTimeoutError("Tempo limite excedido ao consultar o LLM.") from exc
             return {
                 "messages": [*injected_messages, _build_temporary_failure_ai_message()],
                 "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
@@ -505,7 +530,11 @@ def build_analytics_graph(
                         ]
                     ),
                 )
-            except Exception:
+            except Exception as exc:
+                if is_llm_timeout_error(exc):
+                    raise LlmTimeoutError(
+                        "Tempo limite excedido ao sintetizar a resposta final."
+                    ) from exc
                 return {
                     "messages": [_build_temporary_failure_ai_message()],
                     "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
@@ -571,15 +600,44 @@ def build_analytics_graph(
     graph.add_edge("tools", "final_response")
     graph.add_edge("final_response", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
+
+
+@lru_cache
+def get_persistent_analytics_graph() -> Any:
+    """Return a cached graph compiled with in-memory checkpoint persistence."""
+
+    return build_analytics_graph(get_settings(), checkpointer=MemorySaver())
 
 
 def invoke_analytics_graph(
     question: str,
     settings: Settings | None = None,
+    *,
+    thread_id: str | None = None,
+    graph: Any | None = None,
 ) -> AnalyticsGraphState:
-    graph = build_analytics_graph(settings)
-    return cast(AnalyticsGraphState, graph.invoke({"question": question}))
+    resolved_graph = graph
+    if resolved_graph is None:
+        resolved_graph = (
+            get_persistent_analytics_graph()
+            if thread_id
+            else build_analytics_graph(settings)
+        )
+
+    config: dict[str, Any] | None = None
+    if thread_id:
+        config = {"configurable": {"thread_id": thread_id}}
+
+    input_state: AnalyticsGraphState = {
+        "question": question,
+        # Reset overwrite-style per-turn fields so resumed checkpoints do not
+        # leak the previous turn's answer or tool list into the current turn.
+        "final_answer": "",
+        "tools_used": [],
+    }
+
+    return cast(AnalyticsGraphState, resolved_graph.invoke(input_state, config=config))
 
 
 __all__ = [
@@ -590,5 +648,6 @@ __all__ = [
     "TEMPORARY_TOOL_FAILURE_MESSAGE",
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "build_analytics_graph",
+    "get_persistent_analytics_graph",
     "invoke_analytics_graph",
 ]

@@ -1,16 +1,37 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+import httpx
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
+from openai import APITimeoutError as OpenAIAPITimeoutError
 from pydantic import SecretStr
 
 from app.graph.tools import get_analytics_tools
 from app.utils.config import Settings, SettingsError, SupportedLlmProvider, get_settings
 
 DEFAULT_LLM_TEMPERATURE = 0
+
+
+class LlmTimeoutError(RuntimeError):
+    """Raised when the underlying LLM provider times out."""
+
+
+def is_llm_timeout_error(exc: BaseException) -> bool:
+    return isinstance(
+        exc,
+        (
+            TimeoutError,
+            asyncio.TimeoutError,
+            httpx.TimeoutException,
+            OpenAIAPITimeoutError,
+            AnthropicAPITimeoutError,
+        ),
+    )
 
 
 def _resolve_settings(settings: Settings | None = None) -> Settings:
