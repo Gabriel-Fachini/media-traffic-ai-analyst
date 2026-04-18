@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from functools import lru_cache
 import json
 import re
 import unicodedata
@@ -14,6 +15,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
@@ -23,7 +26,7 @@ from app.graph.prompts import (
     build_conversation_system_prompt,
 )
 from app.graph.tools import get_analytics_tools
-from app.utils.config import Settings
+from app.utils.config import Settings, get_settings
 
 DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 DIMENSION_REQUEST_PATTERN = re.compile(
@@ -340,6 +343,7 @@ def build_analytics_graph(
     tool_enabled_llm: Any | None = None,
     response_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
+    checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
     tools_by_name = {tool.name: tool for tool in analytics_tools}
@@ -571,15 +575,36 @@ def build_analytics_graph(
     graph.add_edge("tools", "final_response")
     graph.add_edge("final_response", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
+
+
+@lru_cache
+def get_persistent_analytics_graph() -> Any:
+    """Return a cached graph compiled with in-memory checkpoint persistence."""
+
+    return build_analytics_graph(get_settings(), checkpointer=MemorySaver())
 
 
 def invoke_analytics_graph(
     question: str,
     settings: Settings | None = None,
+    *,
+    thread_id: str | None = None,
+    graph: Any | None = None,
 ) -> AnalyticsGraphState:
-    graph = build_analytics_graph(settings)
-    return cast(AnalyticsGraphState, graph.invoke({"question": question}))
+    resolved_graph = graph
+    if resolved_graph is None:
+        resolved_graph = (
+            get_persistent_analytics_graph()
+            if thread_id
+            else build_analytics_graph(settings)
+        )
+
+    config: dict[str, Any] | None = None
+    if thread_id:
+        config = {"configurable": {"thread_id": thread_id}}
+
+    return cast(AnalyticsGraphState, resolved_graph.invoke({"question": question}, config=config))
 
 
 __all__ = [
@@ -590,5 +615,6 @@ __all__ = [
     "TEMPORARY_TOOL_FAILURE_MESSAGE",
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "build_analytics_graph",
+    "get_persistent_analytics_graph",
     "invoke_analytics_graph",
 ]

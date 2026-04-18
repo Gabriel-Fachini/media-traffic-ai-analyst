@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Annotated
+from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI, HTTPException, status
+from fastapi import Body, Depends, FastAPI
 from pydantic import BaseModel
 
-from app.schemas import QueryRequest, QueryResponse
+from app.graph import invoke_analytics_graph
+from app.graph.workflow import get_persistent_analytics_graph
+from app.schemas import QueryMetadata, QueryRequest, QueryResponse
 from app.utils.config import Settings, get_settings
 
 app = FastAPI(title="Media Traffic AI Analyst")
@@ -26,6 +30,14 @@ class HealthResponse(BaseModel):
     environment: str
 
 
+@lru_cache
+def get_query_graph() -> object:
+    return get_persistent_analytics_graph()
+
+
+AnalyticsGraphDep = Annotated[object, Depends(get_query_graph)]
+
+
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 def health_check(settings: SettingsDep) -> HealthResponse:
     return HealthResponse(status="ok", environment=settings.app_env)
@@ -35,18 +47,26 @@ def health_check(settings: SettingsDep) -> HealthResponse:
     "/query",
     response_model=QueryResponse,
     tags=["query"],
-    summary="Recebe uma pergunta de analytics e retorna o contrato final da API",
-    responses={
-        status.HTTP_501_NOT_IMPLEMENTED: {
-            "description": "Fluxo de execucao do grafo ainda sera conectado na task 4.2."
-        }
-    },
+    summary="Recebe uma pergunta de analytics e retorna a resposta do agente",
 )
-def query_analytics(request: QueryRequestBody) -> QueryResponse:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=(
-            "O endpoint /query ja expõe o contrato HTTP no Swagger, mas a execucao "
-            "do grafo sera conectada na task 4.2."
+def query_analytics(
+    request: QueryRequestBody,
+    graph: AnalyticsGraphDep,
+) -> QueryResponse:
+    thread_id = request.thread_id or str(uuid4())
+    state = invoke_analytics_graph(
+        request.question,
+        thread_id=thread_id,
+        graph=graph,
+    )
+    messages = state.get("messages", [])
+
+    return QueryResponse(
+        answer=state.get("final_answer", ""),
+        tools_used=state.get("tools_used", []),
+        metadata=QueryMetadata(
+            thread_id=thread_id,
+            thread_id_source="provided" if request.thread_id else "generated",
+            context_message_count=len(messages),
         ),
     )
