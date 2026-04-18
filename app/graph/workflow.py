@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
@@ -16,30 +17,79 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from app.graph.llm import build_analytics_llm, build_tool_enabled_llm
+from app.graph.prompts import (
+    FINAL_RESPONSE_SYSTEM_PROMPT,
+    build_conversation_system_prompt,
+)
 from app.graph.tools import get_analytics_tools
+from app.schema_catalog import SCHEMA_CATALOG
 from app.utils.config import Settings
 
 DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
-
-# Task 3.2 needs enough instruction for graph control; task 3.3 will centralize
-# and tighten the final system prompt and scope policy.
-CONVERSATION_SYSTEM_PROMPT = """
-Voce e um Analista Junior de Midia focado no dataset thelook_ecommerce.
-Use as tools para responder perguntas sobre trafego e receita baseadas em dados.
-Nao invente numeros nem responda perguntas de analytics sem consultar tool.
-Se a pergunta estiver fora do escopo de trafego, canais, usuarios, pedidos ou receita,
-responda com uma recusa educada e curta.
-Se faltar start_date ou end_date em formato YYYY-MM-DD, peca clarificacao antes de
-chamar qualquer tool.
-""".strip()
-
-FINAL_RESPONSE_SYSTEM_PROMPT = """
-Voce recebe a pergunta original do usuario e os resultados estruturados de tools analytics.
-Produza uma resposta final em pt-BR com linguagem clara de negocio.
-Nao invente metricas, nao exponha SQL e nao copie a tabela bruta sem interpretacao.
-Explique o principal sinal encontrado e uma implicacao simples para Growth.
-Se nao houver linhas no resultado, diga isso de forma objetiva.
-""".strip()
+QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
+SUPPORTED_ROUTING_ALIASES = frozenset(
+    {
+        "trafego",
+        "traffic",
+        "canal",
+        "canais",
+        "channel",
+        "channels",
+        "usuario",
+        "usuarios",
+        "user",
+        "users",
+        "pedido",
+        "pedidos",
+        "order",
+        "orders",
+        "receita",
+        "revenue",
+        "ranking",
+        "performance",
+        "desempenho",
+        "search",
+        "organic",
+        "facebook",
+        "instagram",
+        "email",
+    }
+)
+UNSUPPORTED_METRIC_TOKENS = frozenset(
+    {
+        "cac",
+        "roas",
+        "roi",
+        "ltv",
+        "ctr",
+        "cpc",
+        "cpm",
+        "impressao",
+        "impressoes",
+        "impression",
+        "impressions",
+        "clique",
+        "cliques",
+        "click",
+        "clicks",
+        "campanha",
+        "campanhas",
+        "campaign",
+        "campaigns",
+        "anuncio",
+        "anuncios",
+        "ad",
+        "ads",
+        "criativo",
+        "criativos",
+        "creative",
+        "creatives",
+        "empresa",
+        "empresas",
+        "company",
+        "companies",
+    }
+)
 
 MISSING_DATES_MESSAGE = (
     "Preciso que voce informe start_date e end_date no formato YYYY-MM-DD para eu "
@@ -59,6 +109,30 @@ class AnalyticsGraphState(TypedDict, total=False):
     next_step: Literal["conversation", "tools", "final_response"]
     final_answer: str
     tools_used: list[str]
+
+
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    return "".join(
+        character for character in normalized if not unicodedata.combining(character)
+    ).lower()
+
+
+def _build_schema_signal_tokens() -> frozenset[str]:
+    tokens: set[str] = set()
+
+    for table in SCHEMA_CATALOG.tables:
+        entries = [table.name, *[column.name for column in table.columns]]
+        for entry in entries:
+            normalized_entry = _normalize_text(entry)
+            tokens.add(normalized_entry)
+            tokens.update(part for part in normalized_entry.split("_") if part)
+
+    return frozenset(tokens)
+
+
+SCHEMA_SIGNAL_TOKENS = _build_schema_signal_tokens()
+SUPPORTED_ROUTING_TOKENS = SCHEMA_SIGNAL_TOKENS | SUPPORTED_ROUTING_ALIASES
 
 
 def _content_to_text(content: Any) -> str:
@@ -102,6 +176,21 @@ def _extract_iso_dates(question: str) -> list[str]:
     return DATE_TOKEN_PATTERN.findall(question)
 
 
+def _extract_question_tokens(question: str) -> set[str]:
+    return set(QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)))
+
+
+def _question_supports_date_clarification(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    return bool(question_tokens & SUPPORTED_ROUTING_TOKENS)
+
+
 def _get_last_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
     for message in reversed(messages):
         if isinstance(message, AIMessage):
@@ -143,6 +232,7 @@ def build_analytics_graph(
     tools_by_name = {tool.name: tool for tool in analytics_tools}
     conversation_llm = tool_enabled_llm or build_tool_enabled_llm(settings)
     synthesis_llm = response_llm or build_analytics_llm(settings)
+    conversation_system_prompt = build_conversation_system_prompt()
 
     def router_node(state: AnalyticsGraphState) -> dict[str, Any]:
         question = _resolve_question(state)
@@ -152,7 +242,10 @@ def build_analytics_graph(
                 "next_step": "final_response",
             }
 
-        if len(_extract_iso_dates(question)) < 2:
+        if (
+            _question_supports_date_clarification(question)
+            and len(_extract_iso_dates(question)) < 2
+        ):
             return {
                 "final_answer": MISSING_DATES_MESSAGE,
                 "next_step": "final_response",
@@ -172,7 +265,7 @@ def build_analytics_graph(
         response = cast(
             AIMessage,
             conversation_llm.invoke(
-                [SystemMessage(content=CONVERSATION_SYSTEM_PROMPT), *existing_messages]
+                [SystemMessage(content=conversation_system_prompt), *existing_messages]
             ),
         )
 
