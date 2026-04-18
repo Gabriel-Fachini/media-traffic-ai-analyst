@@ -41,8 +41,8 @@
 
 **Foco:** Validar o fluxo fim-a-fim com interação simples via terminal e empacotar para o testador da vaga.
 
-- [ ] 5.1 Criar um modo simples de interação em terminal (CLI) para enviar perguntas e imprimir respostas do agente em modo conversacional contínuo, reaproveitando o contexto da mesma conversa até o encerramento.
-- [ ] 5.2 Avaliar e limpar os outputs, checar formatação Pt-BR correta de números e clareza do insight.
+- [x] 5.1 Criar um modo simples de interação em terminal (CLI) para enviar perguntas e imprimir respostas do agente em modo conversacional contínuo, reaproveitando o contexto da mesma conversa até o encerramento.
+- [x] 5.2 Avaliar e limpar os outputs, checar formatação Pt-BR correta de números e clareza do insight.
 - [ ] 5.3 Elaborar um `README.md` esmerado que liste um passo a passo objetivo: (1) Onde gerar chave JSON do cloud, (2) onde colocar no ambiente (3) como invocar scripts/CLI e API e (4) uma arquitetura visual final.
 
 ### Backlog Pós-MVP: UI Web (Opcional)
