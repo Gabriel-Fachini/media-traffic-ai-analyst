@@ -4,15 +4,21 @@ from functools import lru_cache
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI
+from fastapi import Body, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.graph import invoke_analytics_graph
+from app.graph.llm import LlmTimeoutError
 from app.graph.workflow import get_persistent_analytics_graph
-from app.schemas import QueryMetadata, QueryRequest, QueryResponse
+from app.schemas import ErrorResponse, QueryMetadata, QueryRequest, QueryResponse
 from app.utils.config import Settings, get_settings
 
 app = FastAPI(title="Media Traffic AI Analyst")
+
+LLM_TIMEOUT_ERROR_MESSAGE = (
+    "Nao consegui concluir a analise agora porque o provedor de IA excedeu o "
+    "tempo limite. Tente novamente em instantes."
+)
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 QueryRequestBody = Annotated[
@@ -48,17 +54,27 @@ def health_check(settings: SettingsDep) -> HealthResponse:
     response_model=QueryResponse,
     tags=["query"],
     summary="Recebe uma pergunta de analytics e retorna a resposta do agente",
+    responses={
+        500: {
+            "model": ErrorResponse,
+            "description": "Falha temporaria ao consultar ou sintetizar via LLM.",
+        }
+    },
 )
 def query_analytics(
     request: QueryRequestBody,
     graph: AnalyticsGraphDep,
 ) -> QueryResponse:
     thread_id = request.thread_id or str(uuid4())
-    state = invoke_analytics_graph(
-        request.question,
-        thread_id=thread_id,
-        graph=graph,
-    )
+    try:
+        state = invoke_analytics_graph(
+            request.question,
+            thread_id=thread_id,
+            graph=graph,
+        )
+    except LlmTimeoutError as exc:
+        raise HTTPException(status_code=500, detail=LLM_TIMEOUT_ERROR_MESSAGE) from exc
+
     messages = state.get("messages", [])
 
     return QueryResponse(

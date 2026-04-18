@@ -35,7 +35,7 @@
 
 - [x] 4.1 Definir esquemas para as Requests do usuário final no Swagger (`pydantic routers`).
 - [x] 4.2 Injetar o nó Graph já rodando e compilar o retorno em JSON com formatação `answer`, e os `metadata` identificando as ferramentas atuando nos bastidores do sistema. É aqui que a continuidade multi-turn entre chamadas deve ser ligada ao fluxo real da aplicação.
-- [ ] 4.3 Capturar as chamadas em caso de TimeOut do LLM e devolver um erro 500 sem arrebentar a execução.
+- [x] 4.3 Capturar as chamadas em caso de TimeOut do LLM e devolver um erro 500 sem arrebentar a execução.
 
 ### Fase 5: Interação em Terminal e Apresentação
 

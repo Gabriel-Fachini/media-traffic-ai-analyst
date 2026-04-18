@@ -1,6 +1,6 @@
 """Pydantic schemas for API and tool contracts."""
 
-from app.schemas.api import QueryMetadata, QueryRequest, QueryResponse
+from app.schemas.api import ErrorResponse, QueryMetadata, QueryRequest, QueryResponse
 from app.schemas.tools import (
     ChannelPerformanceInput,
     ChannelPerformanceOutput,
@@ -11,6 +11,7 @@ from app.schemas.tools import (
 )
 
 __all__ = [
+    "ErrorResponse",
     "QueryMetadata",
     "QueryRequest",
     "QueryResponse",

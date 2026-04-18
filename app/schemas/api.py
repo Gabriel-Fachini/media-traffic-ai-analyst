@@ -74,6 +74,16 @@ class QueryMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ErrorResponse(BaseModel):
+    """HTTP error contract for API failures."""
+
+    detail: str = Field(
+        description="Mensagem resumida do erro retornado pela API."
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class QueryResponse(BaseModel):
     """HTTP output contract for analytics answers."""
 

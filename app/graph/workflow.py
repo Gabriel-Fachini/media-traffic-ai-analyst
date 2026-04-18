@@ -20,7 +20,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from app.graph.llm import build_analytics_llm, build_tool_enabled_llm
+from app.graph.llm import (
+    LlmTimeoutError,
+    build_analytics_llm,
+    build_tool_enabled_llm,
+    is_llm_timeout_error,
+)
 from app.graph.prompts import (
     FINAL_RESPONSE_SYSTEM_PROMPT,
     build_conversation_system_prompt,
@@ -416,7 +421,9 @@ def build_analytics_graph(
                     [SystemMessage(content=conversation_system_prompt), *existing_messages]
                 ),
             )
-        except Exception:
+        except Exception as exc:
+            if is_llm_timeout_error(exc):
+                raise LlmTimeoutError("Tempo limite excedido ao consultar o LLM.") from exc
             return {
                 "messages": [*injected_messages, _build_temporary_failure_ai_message()],
                 "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
@@ -509,7 +516,11 @@ def build_analytics_graph(
                         ]
                     ),
                 )
-            except Exception:
+            except Exception as exc:
+                if is_llm_timeout_error(exc):
+                    raise LlmTimeoutError(
+                        "Tempo limite excedido ao sintetizar a resposta final."
+                    ) from exc
                 return {
                     "messages": [_build_temporary_failure_ai_message()],
                     "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
