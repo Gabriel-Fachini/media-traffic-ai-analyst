@@ -25,7 +25,7 @@
 **Foco:** Amarrar os conectores utilizando motor IA para orquestrar as ferramentas por inferência autônoma.
 
 - [x] 3.1 Importar o LLM Node (GPT via Langchain/Langgraph bindings) e vincular a declaração de inputs das Tools (o `bind_tools()`).
-- [ ] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada), com pedido de clarificação quando a pergunta vier sem `start_date` e `end_date`.
+- [ ] 3.2 Construir o `StateGraph` central e os nós da rede do Analista Júnior de Mídia (Nodes de: Conversação, Direcionador, Resposta Final Compilada), com pedido de clarificação quando a pergunta vier sem `start_date` e `end_date`. Nesta etapa, o foco é a estrutura do grafo e o caminho de clarificação; a continuidade multi-turn entre invocações será conectada quando o grafo for integrado à API/CLI.
 - [ ] 3.3 Escrever a instrução base (`SystemPrompt`) restritiva, moldar a inibição inteligente de negação de "Perguntas Fora de Escopo" e apoiar o roteamento com um `schema_catalog` simples (tabelas, colunas e relacionamentos).
 - [ ] 3.4 Verificar se respostas de tabelas puras são ingeridas e retornadas corretamente pelo motor textual.
 
@@ -34,14 +34,14 @@
 **Foco:** Entregar resiliência de endpoints sob o FastAPI.
 
 - [ ] 4.1 Definir esquemas para as Requests do usuário final no Swagger (`pydantic routers`).
-- [ ] 4.2 Injetar o nó Graph já rodando e compilar o retorno em JSON com formatação `answer`, e os `metadata` identificando as ferramentas atuando nos bastidores do sistema.
+- [ ] 4.2 Injetar o nó Graph já rodando e compilar o retorno em JSON com formatação `answer`, e os `metadata` identificando as ferramentas atuando nos bastidores do sistema. É aqui que a continuidade multi-turn entre chamadas deve ser ligada ao fluxo real da aplicação.
 - [ ] 4.3 Capturar as chamadas em caso de TimeOut do LLM e devolver um erro 500 sem arrebentar a execução.
 
 ### Fase 5: Interação em Terminal e Apresentação
 
 **Foco:** Validar o fluxo fim-a-fim com interação simples via terminal e empacotar para o testador da vaga.
 
-- [ ] 5.1 Criar um modo simples de interação em terminal (CLI) para enviar perguntas e imprimir respostas do agente.
+- [ ] 5.1 Criar um modo simples de interação em terminal (CLI) para enviar perguntas e imprimir respostas do agente em modo conversacional contínuo, reaproveitando o contexto da mesma conversa até o encerramento.
 - [ ] 5.2 Avaliar e limpar os outputs, checar formatação Pt-BR correta de números e clareza do insight.
 - [ ] 5.3 Elaborar um `README.md` esmerado que liste um passo a passo objetivo: (1) Onde gerar chave JSON do cloud, (2) onde colocar no ambiente (3) como invocar scripts/CLI e API e (4) uma arquitetura visual final.
 
