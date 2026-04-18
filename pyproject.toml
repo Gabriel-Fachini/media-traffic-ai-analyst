@@ -15,7 +15,13 @@ dependencies = [
 	"langchain-openai>=1.0.1,<2.0.0",
 	"google-cloud-bigquery>=3.31.0,<4.0.0",
 	"fastapi-cli>=0.0.24,<0.0.25",
+	"httpx>=0.28.1,<0.29.0",
+	"rich>=15.0.0,<16.0.0",
+	"typer>=0.24.1,<0.25.0",
 ]
+
+[project.scripts]
+analyst-chat = "app.cli:entrypoint"
 
 [tool.poetry]
 packages = [{ include = "app" }]
