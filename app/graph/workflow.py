@@ -22,23 +22,35 @@ from app.graph.prompts import (
     build_conversation_system_prompt,
 )
 from app.graph.tools import get_analytics_tools
-from app.schema_catalog import SCHEMA_CATALOG
 from app.utils.config import Settings
 
 DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
-SUPPORTED_ROUTING_ALIASES = frozenset(
+SUPPORTED_CHANNEL_TOKENS = frozenset(
     {
-        "trafego",
-        "traffic",
         "canal",
         "canais",
         "channel",
         "channels",
+    }
+)
+SUPPORTED_VOLUME_SIGNAL_TOKENS = frozenset(
+    {
+        "trafego",
+        "traffic",
+        "volume",
+    }
+)
+SUPPORTED_USER_METRIC_TOKENS = frozenset(
+    {
         "usuario",
         "usuarios",
         "user",
         "users",
+    }
+)
+SUPPORTED_PERFORMANCE_METRIC_TOKENS = frozenset(
+    {
         "pedido",
         "pedidos",
         "order",
@@ -48,11 +60,16 @@ SUPPORTED_ROUTING_ALIASES = frozenset(
         "ranking",
         "performance",
         "desempenho",
+        "melhor",
+        "top",
+    }
+)
+SUPPORTED_SOURCE_TOKENS = frozenset(
+    {
         "search",
         "organic",
         "facebook",
         "instagram",
-        "email",
     }
 )
 UNSUPPORTED_METRIC_TOKENS = frozenset(
@@ -98,6 +115,9 @@ MISSING_DATES_MESSAGE = (
 EMPTY_QUESTION_MESSAGE = (
     "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."
 )
+TEMPORARY_LLM_FAILURE_MESSAGE = (
+    "Nao consegui concluir a analise agora por uma falha temporaria. Tente novamente em instantes."
+)
 TEMPORARY_TOOL_FAILURE_MESSAGE = (
     "Nao consegui consultar os dados agora por uma falha temporaria. Tente novamente em instantes."
 )
@@ -116,23 +136,6 @@ def _normalize_text(value: str) -> str:
     return "".join(
         character for character in normalized if not unicodedata.combining(character)
     ).lower()
-
-
-def _build_schema_signal_tokens() -> frozenset[str]:
-    tokens: set[str] = set()
-
-    for table in SCHEMA_CATALOG.tables:
-        entries = [table.name, *[column.name for column in table.columns]]
-        for entry in entries:
-            normalized_entry = _normalize_text(entry)
-            tokens.add(normalized_entry)
-            tokens.update(part for part in normalized_entry.split("_") if part)
-
-    return frozenset(tokens)
-
-
-SCHEMA_SIGNAL_TOKENS = _build_schema_signal_tokens()
-SUPPORTED_ROUTING_TOKENS = SCHEMA_SIGNAL_TOKENS | SUPPORTED_ROUTING_ALIASES
 
 
 def _content_to_text(content: Any) -> str:
@@ -188,12 +191,32 @@ def _question_supports_date_clarification(question: str) -> bool:
     if question_tokens & UNSUPPORTED_METRIC_TOKENS:
         return False
 
-    return bool(question_tokens & SUPPORTED_ROUTING_TOKENS)
+    has_performance_metric = bool(
+        question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS
+    )
+    has_user_metric = bool(question_tokens & SUPPORTED_USER_METRIC_TOKENS)
+    has_channel_context = bool(
+        question_tokens
+        & (
+            SUPPORTED_CHANNEL_TOKENS
+            | SUPPORTED_VOLUME_SIGNAL_TOKENS
+            | SUPPORTED_SOURCE_TOKENS
+        )
+    )
+
+    return has_performance_metric or (has_user_metric and has_channel_context)
 
 
 def _get_last_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
     for message in reversed(messages):
         if isinstance(message, AIMessage):
+            return message
+    return None
+
+
+def _get_last_human_message(messages: list[AnyMessage]) -> HumanMessage | None:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
             return message
     return None
 
@@ -219,6 +242,10 @@ def _collect_tools_used(messages: list[AnyMessage]) -> list[str]:
 
 def _serialize_tool_result(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+
+
+def _build_temporary_failure_ai_message() -> AIMessage:
+    return AIMessage(content=TEMPORARY_LLM_FAILURE_MESSAGE)
 
 
 def build_analytics_graph(
@@ -255,19 +282,34 @@ def build_analytics_graph(
 
     def conversation_node(state: AnalyticsGraphState) -> dict[str, Any]:
         question = _resolve_question(state)
+        explicit_question = state.get("question", "").strip()
         existing_messages = list(state.get("messages", []))
         injected_messages: list[AnyMessage] = []
 
-        if not existing_messages:
+        last_human_message = _get_last_human_message(existing_messages)
+        if explicit_question and (
+            last_human_message is None
+            or _content_to_text(last_human_message.content).strip() != explicit_question
+        ):
+            injected_messages.append(HumanMessage(content=explicit_question))
+        elif not existing_messages:
             injected_messages.append(HumanMessage(content=question))
-            existing_messages = list(injected_messages)
 
-        response = cast(
-            AIMessage,
-            conversation_llm.invoke(
-                [SystemMessage(content=conversation_system_prompt), *existing_messages]
-            ),
-        )
+        if injected_messages:
+            existing_messages = [*existing_messages, *injected_messages]
+
+        try:
+            response = cast(
+                AIMessage,
+                conversation_llm.invoke(
+                    [SystemMessage(content=conversation_system_prompt), *existing_messages]
+                ),
+            )
+        except Exception:
+            return {
+                "messages": [*injected_messages, _build_temporary_failure_ai_message()],
+                "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+            }
 
         return {"messages": [*injected_messages, response]}
 
@@ -341,20 +383,27 @@ def build_analytics_graph(
                 f"Tool: {message.name}\nResultado:\n{_content_to_text(message.content)}"
                 for message in tool_messages
             )
-            synthesized_response = cast(
-                AIMessage,
-                synthesis_llm.invoke(
-                    [
-                        SystemMessage(content=FINAL_RESPONSE_SYSTEM_PROMPT),
-                        HumanMessage(
-                            content=(
-                                f"Pergunta original:\n{question}\n\n"
-                                f"Resultados estruturados:\n{tool_context}"
-                            )
-                        ),
-                    ]
-                ),
-            )
+            try:
+                synthesized_response = cast(
+                    AIMessage,
+                    synthesis_llm.invoke(
+                        [
+                            SystemMessage(content=FINAL_RESPONSE_SYSTEM_PROMPT),
+                            HumanMessage(
+                                content=(
+                                    f"Pergunta original:\n{question}\n\n"
+                                    f"Resultados estruturados:\n{tool_context}"
+                                )
+                            ),
+                        ]
+                    ),
+                )
+            except Exception:
+                return {
+                    "messages": [_build_temporary_failure_ai_message()],
+                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+                    "tools_used": tools_used,
+                }
             return {
                 "messages": [synthesized_response],
                 "final_answer": _content_to_text(synthesized_response.content).strip(),
@@ -428,6 +477,9 @@ def invoke_analytics_graph(
 
 __all__ = [
     "AnalyticsGraphState",
+    "MISSING_DATES_MESSAGE",
+    "TEMPORARY_LLM_FAILURE_MESSAGE",
+    "TEMPORARY_TOOL_FAILURE_MESSAGE",
     "build_analytics_graph",
     "invoke_analytics_graph",
 ]

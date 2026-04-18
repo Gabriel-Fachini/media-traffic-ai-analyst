@@ -61,43 +61,43 @@ def _bind_analytics_tools(model: BaseChatModel) -> Any:
     )
 
 
-def build_analytics_llm(settings: Settings | None = None) -> BaseChatModel:
-    """Build the base chat model used by the analytics graph."""
+def _build_llm_with_optional_fallback(
+    settings: Settings,
+    *,
+    bind_tools: bool,
+) -> Any:
+    def prepare_model(
+        provider: SupportedLlmProvider,
+        model_name: str,
+    ) -> BaseChatModel | Any:
+        model = _build_provider_model(settings, provider, model_name)
+        if bind_tools:
+            return _bind_analytics_tools(model)
+        return model
+
+    primary_model = prepare_model(settings.llm_provider, settings.llm_model)
+    if not settings.llm_fallback_provider:
+        return primary_model
+
+    fallback_model_name = settings.llm_fallback_model
+    if fallback_model_name is None:
+        raise SettingsError(
+            "LLM_FALLBACK_MODEL e obrigatorio quando um fallback estiver configurado."
+        )
+
+    fallback_model = prepare_model(settings.llm_fallback_provider, fallback_model_name)
+    return primary_model.with_fallbacks([fallback_model])
+
+
+def build_analytics_llm(settings: Settings | None = None) -> Any:
+    """Build the base chat model used by the analytics graph, with optional fallback."""
 
     resolved_settings = _resolve_settings(settings)
-    return _build_provider_model(
-        resolved_settings,
-        resolved_settings.llm_provider,
-        resolved_settings.llm_model,
-    )
+    return _build_llm_with_optional_fallback(resolved_settings, bind_tools=False)
 
 
 def build_tool_enabled_llm(settings: Settings | None = None) -> Any:
     """Build a chat model already bound to analytics tools, with optional fallback."""
 
     resolved_settings = _resolve_settings(settings)
-
-    primary_model = _bind_analytics_tools(
-        _build_provider_model(
-            resolved_settings,
-            resolved_settings.llm_provider,
-            resolved_settings.llm_model,
-        )
-    )
-    if not resolved_settings.llm_fallback_provider:
-        return primary_model
-
-    fallback_model_name = resolved_settings.llm_fallback_model
-    if fallback_model_name is None:
-        raise SettingsError(
-            "LLM_FALLBACK_MODEL e obrigatorio quando um fallback estiver configurado."
-        )
-
-    fallback_model = _bind_analytics_tools(
-        _build_provider_model(
-            resolved_settings,
-            resolved_settings.llm_fallback_provider,
-            fallback_model_name,
-        )
-    )
-    return primary_model.with_fallbacks([fallback_model])
+    return _build_llm_with_optional_fallback(resolved_settings, bind_tools=True)

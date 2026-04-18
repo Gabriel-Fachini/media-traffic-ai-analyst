@@ -8,6 +8,11 @@ from typing import Any, cast
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
 from app.graph import AnalyticsGraphState, invoke_analytics_graph
+from app.graph.workflow import (
+    MISSING_DATES_MESSAGE,
+    TEMPORARY_LLM_FAILURE_MESSAGE,
+    TEMPORARY_TOOL_FAILURE_MESSAGE,
+)
 from app.utils.config import SettingsError
 
 
@@ -16,6 +21,8 @@ class ValidationScenario:
     name: str
     description: str
     question: str
+    expects_tool_execution: bool
+    forbidden_final_answers: tuple[str, ...] = ()
 
 
 def build_scenarios() -> list[ValidationScenario]:
@@ -26,6 +33,7 @@ def build_scenarios() -> list[ValidationScenario]:
             question=(
                 "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?"
             ),
+            expects_tool_execution=True,
         ),
         ValidationScenario(
             name="traffic-volume-search",
@@ -34,6 +42,7 @@ def build_scenarios() -> list[ValidationScenario]:
                 "Qual foi o volume de usuarios de Search entre 2024-01-01 e "
                 "2024-01-31?"
             ),
+            expects_tool_execution=True,
         ),
         ValidationScenario(
             name="channel-performance-all",
@@ -42,6 +51,7 @@ def build_scenarios() -> list[ValidationScenario]:
                 "Quais canais tiveram melhor desempenho de receita entre "
                 "2024-01-01 e 2024-01-31?"
             ),
+            expects_tool_execution=True,
         ),
         ValidationScenario(
             name="channel-performance-search",
@@ -50,16 +60,29 @@ def build_scenarios() -> list[ValidationScenario]:
                 "Qual foi a receita e o total de pedidos de Search entre 2024-01-01 "
                 "e 2024-01-31?"
             ),
+            expects_tool_execution=True,
         ),
         ValidationScenario(
             name="missing-dates",
             description="Valida pedido de clarificacao quando faltam datas.",
             question="Qual foi a receita de Search?",
+            expects_tool_execution=False,
         ),
         ValidationScenario(
             name="out-of-scope",
             description="Valida recusa educada para pergunta fora do dominio.",
             question="Como fazer um bolo?",
+            expects_tool_execution=False,
+        ),
+        ValidationScenario(
+            name="unsupported-schema-field",
+            description=(
+                "Valida que coluna fora do contrato nao vira pedido de datas nem "
+                "consulta de tool."
+            ),
+            question="Qual e o email dos usuarios?",
+            expects_tool_execution=False,
+            forbidden_final_answers=(MISSING_DATES_MESSAGE,),
         ),
     ]
 
@@ -254,6 +277,44 @@ def _print_state(
     print()
 
 
+def _collect_validation_errors(
+    scenario: ValidationScenario,
+    state: AnalyticsGraphState,
+) -> list[str]:
+    messages = cast(list[AnyMessage], state.get("messages", []))
+    final_answer = state.get("final_answer", "").strip()
+    tool_messages = [
+        message for message in messages if isinstance(message, ToolMessage)
+    ]
+    tool_errors = [message for message in tool_messages if message.status == "error"]
+    tools_used = cast(list[str], state.get("tools_used", []))
+
+    errors: list[str] = []
+    if final_answer in {
+        TEMPORARY_LLM_FAILURE_MESSAGE,
+        TEMPORARY_TOOL_FAILURE_MESSAGE,
+    }:
+        errors.append("o grafo retornou mensagem temporaria de falha.")
+
+    if scenario.expects_tool_execution:
+        if not tools_used:
+            errors.append("nenhuma tool foi executada em um cenario que depende de dados.")
+        if tool_errors:
+            errors.append("houve ToolMessage com status=error.")
+    else:
+        if tools_used:
+            errors.append("houve tool executada em um cenario que nao deveria consultar dados.")
+        if tool_errors:
+            errors.append("houve ToolMessage com status=error em um cenario sem consulta.")
+
+    if final_answer in scenario.forbidden_final_answers:
+        errors.append(
+            "a resposta final caiu em uma mensagem explicitamente proibida para o cenario."
+        )
+
+    return errors
+
+
 def main() -> int:
     args = parse_args()
     scenarios = build_scenarios()
@@ -264,6 +325,8 @@ def main() -> int:
         print(f"[ERRO] {exc}")
         return 1
 
+    had_validation_error = False
+
     try:
         for scenario in selected_scenarios:
             state = invoke_analytics_graph(scenario.question)
@@ -273,11 +336,22 @@ def main() -> int:
                 show_messages=args.show_messages,
                 show_tool_results=args.show_tool_results,
             )
+            validation_errors = _collect_validation_errors(scenario, state)
+            if validation_errors:
+                had_validation_error = True
+                print(f"[ERRO] Validacao falhou para {scenario.name}:")
+                for error in validation_errors:
+                    print(f"  - {error}")
+                print()
     except SettingsError as exc:
         print(f"[ERRO] {exc}")
         return 1
     except Exception as exc:
         print(f"[ERRO] Falha ao executar o grafo: {exc}")
+        return 1
+
+    if had_validation_error:
+        print("[ERRO] Um ou mais cenarios falharam na validacao do grafo.")
         return 1
 
     print(f"[OK] {len(selected_scenarios)} cenario(s) executado(s) com sucesso.")
