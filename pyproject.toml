@@ -22,9 +22,15 @@ packages = [{ include = "app" }]
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.6"
+pyright = "^1.1.406"
 
 [tool.fastapi]
 entrypoint = "app.main:app"
+
+[tool.pyright]
+include = ["app", "scripts"]
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]

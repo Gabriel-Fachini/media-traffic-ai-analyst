@@ -5,6 +5,7 @@ from typing import Any
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from app.graph.tools import get_analytics_tools
 from app.utils.config import Settings, SettingsError, SupportedLlmProvider, get_settings
@@ -24,18 +25,31 @@ def _resolve_settings(settings: Settings | None = None) -> Settings:
 
 
 def _build_provider_model(
+    settings: Settings,
     provider: SupportedLlmProvider,
     model_name: str,
 ) -> BaseChatModel:
     if provider == "openai":
+        openai_api_key = settings.openai_api_key
+        if openai_api_key is None:
+            raise SettingsError("Variavel obrigatoria ausente no ambiente: OPENAI_API_KEY.")
+
         return ChatOpenAI(
             model=model_name,
             temperature=DEFAULT_LLM_TEMPERATURE,
+            api_key=SecretStr(openai_api_key),
         )
     if provider == "anthropic":
+        anthropic_api_key = settings.anthropic_api_key
+        if anthropic_api_key is None:
+            raise SettingsError("Variavel obrigatoria ausente no ambiente: ANTHROPIC_API_KEY.")
+
         return ChatAnthropic(
             model_name=model_name,
             temperature=DEFAULT_LLM_TEMPERATURE,
+            timeout=None,
+            stop=None,
+            api_key=SecretStr(anthropic_api_key),
         )
     raise SettingsError(f"Provider LLM nao suportado: {provider}.")
 
@@ -52,6 +66,7 @@ def build_analytics_llm(settings: Settings | None = None) -> BaseChatModel:
 
     resolved_settings = _resolve_settings(settings)
     return _build_provider_model(
+        resolved_settings,
         resolved_settings.llm_provider,
         resolved_settings.llm_model,
     )
@@ -64,6 +79,7 @@ def build_tool_enabled_llm(settings: Settings | None = None) -> Any:
 
     primary_model = _bind_analytics_tools(
         _build_provider_model(
+            resolved_settings,
             resolved_settings.llm_provider,
             resolved_settings.llm_model,
         )
@@ -79,6 +95,7 @@ def build_tool_enabled_llm(settings: Settings | None = None) -> Any:
 
     fallback_model = _bind_analytics_tools(
         _build_provider_model(
+            resolved_settings,
             resolved_settings.llm_fallback_provider,
             fallback_model_name,
         )
