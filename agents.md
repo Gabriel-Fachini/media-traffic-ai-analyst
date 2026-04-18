@@ -197,6 +197,18 @@ System prompt recomendado:
 - Fronteiras de escopo explicitas.
 - Contratos de entrada/saida descritos para iniciar implementacao.
 
+## 10.1 Pipeline de Validacao Durante o Desenvolvimento
+
+- Antes de considerar uma alteracao tecnica concluida, executar:
+  - `poetry run ruff check app scripts`
+  - `python3 -m compileall app scripts`
+  - `poetry run pyright`
+- Quando a alteracao tocar tools BigQuery, preferir tambem validacao manual com:
+  - `poetry run python scripts/manual_validate_tools.py`
+- Quando a alteracao tocar binding/orquestracao de tools, validar pelo menos:
+  - execucao direta das tools
+  - smoke test de `bind_tools()` confirmando `tool_calls`
+
 ## 11. Skills Ativas (Fase Atual)
 
 - langchain-ai/langchain-skills@langgraph-fundamentals
@@ -218,3 +230,4 @@ Objetivo do uso:
 - Nao implementar Streamlit/UI web nesta fase; interacao sera via terminal/CLI.
 - Manter `traffic_source` singular no contrato das tools durante o MVP.
 - Quando houver comparacao entre canais, preferir uma consulta agregada por periodo e comparar os canais na camada de sintese antes de ampliar o schema.
+- Nao atualizar `README.md` durante a implementacao incremental. O README deve ser consolidado no fim do projeto, na fase de entrega, salvo pedido explicito do usuario para antecipar alguma mudanca.

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
+from pydantic import BaseModel
+
 from app.clients.bigquery_client import BigQueryClientError
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 from app.tools import channel_performance_analyzer, traffic_volume_analyzer
@@ -14,7 +16,7 @@ from app.tools import channel_performance_analyzer, traffic_volume_analyzer
 class ValidationScenario:
     name: str
     description: str
-    runner: Callable[[], object]
+    runner: Callable[[], BaseModel]
 
 
 def build_scenarios() -> list[ValidationScenario]:

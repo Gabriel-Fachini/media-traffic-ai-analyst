@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class SettingsError(RuntimeError):
     pass
+
+
+SupportedLlmProvider = Literal["openai", "anthropic"]
 
 
 class Settings(BaseSettings):
@@ -21,7 +25,15 @@ class Settings(BaseSettings):
         default=None,
         alias="GOOGLE_APPLICATION_CREDENTIALS",
     )
+    llm_provider: SupportedLlmProvider = Field(default="openai", alias="LLM_PROVIDER")
+    llm_model: str = Field(default="gpt-4o", alias="LLM_MODEL")
+    llm_fallback_provider: SupportedLlmProvider | None = Field(
+        default=None,
+        alias="LLM_FALLBACK_PROVIDER",
+    )
+    llm_fallback_model: str | None = Field(default=None, alias="LLM_FALLBACK_MODEL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -37,19 +49,52 @@ class Settings(BaseSettings):
         cleaned = value.strip()
         return cleaned or None
 
-    @field_validator("openai_api_key")
+    @field_validator(
+        "openai_api_key",
+        "anthropic_api_key",
+        "llm_fallback_model",
+    )
     @classmethod
-    def normalize_openai_api_key(cls, value: str | None) -> str | None:
+    def normalize_optional_string(cls, value: str | None) -> str | None:
         if value is None:
             return None
         cleaned = value.strip()
         return cleaned or None
 
-    def validate_environment(self) -> None:
-        if not self.openai_api_key:
+    @field_validator("llm_model")
+    @classmethod
+    def normalize_llm_model(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("LLM_MODEL nao pode ser vazio.")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_fallback_pair(self) -> Settings:
+        if self.llm_fallback_provider and not self.llm_fallback_model:
+            raise ValueError(
+                "LLM_FALLBACK_MODEL e obrigatorio quando LLM_FALLBACK_PROVIDER for definido."
+            )
+        if self.llm_fallback_model and not self.llm_fallback_provider:
+            raise ValueError(
+                "LLM_FALLBACK_PROVIDER e obrigatorio quando LLM_FALLBACK_MODEL for definido."
+            )
+        return self
+
+    def require_provider_api_key(self, provider: SupportedLlmProvider) -> None:
+        if provider == "openai" and not self.openai_api_key:
             raise SettingsError(
                 "Variavel obrigatoria ausente no ambiente: OPENAI_API_KEY."
             )
+        if provider == "anthropic" and not self.anthropic_api_key:
+            raise SettingsError(
+                "Variavel obrigatoria ausente no ambiente: ANTHROPIC_API_KEY."
+            )
+
+    def validate_environment(self) -> None:
+        self.require_provider_api_key(self.llm_provider)
+        if self.llm_fallback_provider:
+            self.require_provider_api_key(self.llm_fallback_provider)
 
         if self.google_application_credentials:
             credentials_path = (
@@ -70,6 +115,9 @@ class Settings(BaseSettings):
 
         if self.openai_api_key:
             os.environ["OPENAI_API_KEY"] = self.openai_api_key
+
+        if self.anthropic_api_key:
+            os.environ["ANTHROPIC_API_KEY"] = self.anthropic_api_key
 
 
 @lru_cache
