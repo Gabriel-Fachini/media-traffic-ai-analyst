@@ -229,7 +229,17 @@ def _submit_question(
     session: CliSession,
     question: str,
 ) -> QueryResponse | None:
-    payload = _build_request(question, session.thread_id)
+    try:
+        payload = _build_request(question, session.thread_id)
+    except ValidationError as exc:
+        console.print(
+            _build_error_panel(
+                "A pergunta informada nao atende ao formato esperado. "
+                f"Detalhe: {exc}",
+                title="Entrada Invalida",
+            )
+        )
+        return None
 
     try:
         with console.status(
@@ -301,11 +311,7 @@ def _run_chat_loop(*, api_url: str, timeout: float) -> None:
         while True:
             try:
                 question = _render_prompt().strip()
-            except EOFError:
-                console.print()
-                console.print(Text("Sessao encerrada.", style="bright_black"))
-                return
-            except KeyboardInterrupt:
+            except (EOFError, KeyboardInterrupt):
                 console.print()
                 console.print(Text("Sessao encerrada.", style="bright_black"))
                 return
