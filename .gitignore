@@ -8,3 +8,4 @@ credentials/*
 app/credentials/*.json
 credentials/*.json
 .ruff_cache/
+.pytest_cache/
