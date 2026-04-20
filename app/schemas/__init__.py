@@ -1,6 +1,13 @@
 """Pydantic schemas for API and tool contracts."""
 
-from app.schemas.api import ErrorResponse, QueryMetadata, QueryRequest, QueryResponse
+from app.schemas.api import (
+    DebugError,
+    DebugInfo,
+    ErrorResponse,
+    QueryMetadata,
+    QueryRequest,
+    QueryResponse,
+)
 from app.schemas.router import RouterDecision, RouterNormalizedParams
 from app.schemas.tools import (
     ChannelPerformanceInput,
@@ -24,4 +31,6 @@ __all__ = [
     "TrafficVolumeInput",
     "TrafficVolumeOutput",
     "TrafficVolumeRow",
+    "DebugError",
+    "DebugInfo",
 ]

@@ -20,6 +20,19 @@ DEFAULT_LLM_TEMPERATURE = 0
 class LlmTimeoutError(RuntimeError):
     """Raised when the underlying LLM provider times out."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: str = "insight_synthesizer",
+        error_type: str | None = None,
+        debug_message: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.source = source
+        self.error_type = error_type
+        self.debug_message = debug_message or message
+
 
 def is_llm_timeout_error(exc: BaseException) -> bool:
     return isinstance(

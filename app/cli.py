@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -12,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from app.schemas import ErrorResponse, QueryRequest, QueryResponse
+from app.schemas import DebugError, DebugInfo, ErrorResponse, QueryRequest, QueryResponse
 
 DEFAULT_API_URL = "http://127.0.0.1:8000/query"
 DEFAULT_TIMEOUT_SECONDS = 120.0
@@ -49,6 +50,10 @@ def _build_banner(api_url: str) -> Panel:
         padding=(1, 2),
         title="Terminal",
     )
+
+
+def _build_debug_panel(message: str, *, title: str = "Debug") -> Panel:
+    return Panel(message, border_style="magenta", title=title, padding=(0, 2))
 
 
 def _build_help_panel() -> Panel:
@@ -104,6 +109,65 @@ def _build_error_panel(message: str, *, title: str = "Erro") -> Panel:
     return Panel(message, border_style="red", title=title, padding=(0, 2))
 
 
+def _format_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+def _format_debug_error(debug_error: DebugError) -> str:
+    details: list[str] = [f"[{debug_error.source}]"]
+    if debug_error.tool_name:
+        details.append(f"tool={debug_error.tool_name}")
+    if debug_error.error_type:
+        details.append(f"type={debug_error.error_type}")
+    details.append(debug_error.message)
+    return " ".join(details)
+
+
+def _format_debug_info(debug_info: DebugInfo) -> str:
+    blocks: list[str] = []
+
+    if debug_info.resolved_question:
+        blocks.append(f"resolved_question:\n{debug_info.resolved_question}")
+
+    if debug_info.router_decision is not None:
+        blocks.append(
+            "router_decision:\n"
+            f"{_format_json(debug_info.router_decision)}"
+        )
+
+    if debug_info.errors:
+        blocks.append(
+            "errors:\n"
+            + "\n".join(f"- {_format_debug_error(error)}" for error in debug_info.errors)
+        )
+
+    return "\n\n".join(blocks) or "Nenhum detalhe adicional retornado."
+
+
+def _build_http_debug_message(
+    *,
+    payload: dict[str, Any],
+    response: httpx.Response | None = None,
+    debug_info: DebugInfo | None = None,
+    exc: Exception | None = None,
+) -> str:
+    blocks = [f"request_payload:\n{_format_json(payload)}"]
+
+    if response is not None:
+        raw_body = response.text.strip() or "<empty>"
+        blocks.append(f"status_code:\n{response.status_code}")
+        blocks.append(f"response_body:\n{raw_body}")
+
+    if exc is not None:
+        blocks.append(f"exception_type:\n{type(exc).__name__}")
+        blocks.append(f"exception:\n{exc}")
+
+    if debug_info is not None:
+        blocks.append(f"response_debug:\n{_format_debug_info(debug_info)}")
+
+    return "\n\n".join(blocks)
+
+
 def _format_tools_used(tools_used: list[str]) -> str:
     if not tools_used:
         return "nenhuma"
@@ -140,28 +204,36 @@ def _build_response_panel(response: QueryResponse) -> Panel:
     )
 
 
-def _extract_error_message(response: httpx.Response) -> str:
+def _extract_error_response(response: httpx.Response) -> tuple[str, DebugInfo | None]:
     try:
         payload = response.json()
     except ValueError:
-        return response.text.strip() or response.reason_phrase
+        return response.text.strip() or response.reason_phrase, None
 
-    if response.status_code >= 500:
-        try:
-            return ErrorResponse.model_validate(payload).detail
-        except ValidationError:
-            pass
+    try:
+        error_response = ErrorResponse.model_validate(payload)
+    except ValidationError:
+        error_response = None
+    else:
+        return error_response.detail, error_response.debug
 
     detail = payload.get("detail") if isinstance(payload, dict) else None
     if isinstance(detail, str) and detail.strip():
-        return detail.strip()
+        return detail.strip(), None
 
-    return response.text.strip() or response.reason_phrase
+    return response.text.strip() or response.reason_phrase, None
 
 
-def _render_startup(api_url: str) -> None:
+def _render_startup(api_url: str, *, debug: bool) -> None:
     console.clear()
     console.print(_build_banner(api_url))
+    if debug:
+        console.print(
+            _build_debug_panel(
+                "Modo debug ativo. A CLI exibira payloads, status HTTP e erros internos retornados pela API.",
+                title="Debug Ativo",
+            )
+        )
     console.print(
         Text(
             "Digite sua pergunta e pressione Enter. Use /help para exemplos.",
@@ -175,7 +247,7 @@ def _render_prompt() -> str:
     return console.input("[bold cyan]voce[/bold cyan] [bright_black]>[/bright_black] ")
 
 
-def _handle_command(command: str, session: CliSession, api_url: str) -> bool:
+def _handle_command(command: str, session: CliSession, api_url: str, *, debug: bool) -> bool:
     normalized = command.strip().lower()
 
     if normalized == "/help":
@@ -193,7 +265,7 @@ def _handle_command(command: str, session: CliSession, api_url: str) -> bool:
         return True
 
     if normalized == "/clear":
-        _render_startup(api_url)
+        _render_startup(api_url, debug=debug)
         if session.thread_id:
             console.print(
                 _build_info_panel(
@@ -228,6 +300,7 @@ def _submit_question(
     api_url: str,
     session: CliSession,
     question: str,
+    debug: bool,
 ) -> QueryResponse | None:
     try:
         payload = _build_request(question, session.thread_id)
@@ -246,9 +319,10 @@ def _submit_question(
             "[bold green]Consultando o analista...[/bold green]",
             spinner="dots",
         ):
-            response = client.post(api_url, json=payload)
+            headers = {"X-Debug": "true"} if debug else None
+            response = client.post(api_url, json=payload, headers=headers)
             response.raise_for_status()
-    except httpx.ConnectError:
+    except httpx.ConnectError as exc:
         console.print(
             _build_error_panel(
                 "Nao consegui conectar com a API local. Suba o servidor com "
@@ -256,8 +330,15 @@ def _submit_question(
                 title="API Offline",
             )
         )
+        if debug:
+            console.print(
+                _build_debug_panel(
+                    _build_http_debug_message(payload=payload, exc=exc),
+                    title="Debug HTTP",
+                )
+            )
         return None
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as exc:
         console.print(
             _build_error_panel(
                 "A API demorou mais do que o esperado para responder. Tente "
@@ -265,15 +346,33 @@ def _submit_question(
                 title="Timeout",
             )
         )
+        if debug:
+            console.print(
+                _build_debug_panel(
+                    _build_http_debug_message(payload=payload, exc=exc),
+                    title="Debug HTTP",
+                )
+            )
         return None
     except httpx.HTTPStatusError as exc:
-        message = _extract_error_message(exc.response)
+        message, debug_info = _extract_error_response(exc.response)
         title = (
             "Falha da API"
             if exc.response.status_code >= 500
             else f"HTTP {exc.response.status_code}"
         )
         console.print(_build_error_panel(message, title=title))
+        if debug:
+            console.print(
+                _build_debug_panel(
+                    _build_http_debug_message(
+                        payload=payload,
+                        response=exc.response,
+                        debug_info=debug_info,
+                    ),
+                    title="Debug HTTP",
+                )
+            )
         return None
     except httpx.RequestError as exc:
         console.print(
@@ -283,6 +382,13 @@ def _submit_question(
                 title="Falha de Rede",
             )
         )
+        if debug:
+            console.print(
+                _build_debug_panel(
+                    _build_http_debug_message(payload=payload, exc=exc),
+                    title="Debug HTTP",
+                )
+            )
         return None
 
     try:
@@ -300,12 +406,20 @@ def _submit_question(
     if parsed_response.metadata and parsed_response.metadata.thread_id:
         session.thread_id = parsed_response.metadata.thread_id
 
+    if debug and parsed_response.metadata and parsed_response.metadata.debug:
+        console.print(
+            _build_debug_panel(
+                _format_debug_info(parsed_response.metadata.debug),
+                title="Debug Execucao",
+            )
+        )
+
     return parsed_response
 
 
-def _run_chat_loop(*, api_url: str, timeout: float) -> None:
+def _run_chat_loop(*, api_url: str, timeout: float, debug: bool) -> None:
     session = CliSession()
-    _render_startup(api_url)
+    _render_startup(api_url, debug=debug)
 
     with httpx.Client(timeout=timeout) as client:
         while True:
@@ -320,7 +434,7 @@ def _run_chat_loop(*, api_url: str, timeout: float) -> None:
                 continue
 
             try:
-                command_handled = _handle_command(question, session, api_url)
+                command_handled = _handle_command(question, session, api_url, debug=debug)
             except typer.Exit:
                 console.print(Text("Sessao encerrada.", style="bright_black"))
                 return
@@ -334,6 +448,7 @@ def _run_chat_loop(*, api_url: str, timeout: float) -> None:
                 api_url=api_url,
                 session=session,
                 question=question,
+                debug=debug,
             )
             if response is not None:
                 console.print(_build_response_panel(response))
@@ -356,8 +471,15 @@ def main(
             help="Timeout total da requisicao HTTP em segundos.",
         ),
     ] = DEFAULT_TIMEOUT_SECONDS,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help="Exibe detalhes tecnicos da requisicao e dos erros retornados pela API.",
+        ),
+    ] = False,
 ) -> None:
-    _run_chat_loop(api_url=api_url, timeout=timeout)
+    _run_chat_loop(api_url=api_url, timeout=timeout, debug=debug)
 
 
 def entrypoint() -> None:

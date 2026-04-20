@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -70,6 +70,48 @@ class QueryMetadata(BaseModel):
         ge=0,
         description="Quantidade total de mensagens atualmente armazenadas no contexto da conversa.",
     )
+    debug: "DebugInfo | None" = Field(
+        default=None,
+        description="Detalhes opcionais de diagnostico retornados quando o modo debug estiver ativo.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DebugError(BaseModel):
+    """Structured debug error emitted by the graph or API."""
+
+    source: Literal["tool_executor", "insight_synthesizer", "api"] = Field(
+        description="Origem do erro tecnico capturado no fluxo."
+    )
+    message: str = Field(description="Mensagem tecnica resumida para diagnostico.")
+    error_type: str | None = Field(
+        default=None,
+        description="Tipo concreto da excecao capturada, quando disponivel.",
+    )
+    tool_name: str | None = Field(
+        default=None,
+        description="Nome da tool associada ao erro, quando aplicavel.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DebugInfo(BaseModel):
+    """Optional diagnostics returned when the request asks for debug details."""
+
+    resolved_question: str | None = Field(
+        default=None,
+        description="Pergunta efetivamente usada pelo fluxo apos merge de contexto.",
+    )
+    router_decision: dict[str, Any] | None = Field(
+        default=None,
+        description="Decisao estruturada mais recente do roteador para a pergunta.",
+    )
+    errors: list[DebugError] = Field(
+        default_factory=list,
+        description="Lista de erros tecnicos capturados durante a execucao.",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -79,6 +121,10 @@ class ErrorResponse(BaseModel):
 
     detail: str = Field(
         description="Mensagem resumida do erro retornado pela API."
+    )
+    debug: DebugInfo | None = Field(
+        default=None,
+        description="Detalhes opcionais de diagnostico retornados quando o modo debug estiver ativo.",
     )
 
     model_config = ConfigDict(extra="forbid")

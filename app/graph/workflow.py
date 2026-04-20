@@ -53,6 +53,7 @@ class AnalyticsGraphState(TypedDict, total=False):
     turn_start_index: int
     final_answer: str
     tools_used: list[str]
+    debug_errors: list[dict[str, Any]]
 
 
 def _content_to_text(content: Any) -> str:
@@ -76,6 +77,26 @@ def _content_to_text(content: Any) -> str:
         return "\n".join(parts)
 
     return str(content)
+
+
+def _stringify_exception(exc: BaseException) -> str:
+    message = str(exc).strip()
+    return message or repr(exc)
+
+
+def _build_debug_error(
+    source: str,
+    *,
+    message: str,
+    error_type: str | None = None,
+    tool_name: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "source": source,
+        "message": message,
+        "error_type": error_type,
+        "tool_name": tool_name,
+    }
 
 
 def _resolve_question(state: AnalyticsGraphState) -> str:
@@ -284,6 +305,7 @@ def build_analytics_graph(
             "router_decision": serialized_router_decision,
             "resolved_question": resolved_question,
             "turn_start_index": turn_start_index,
+            "debug_errors": [],
         }
 
         if injected_messages:
@@ -315,7 +337,16 @@ def build_analytics_graph(
                             "estruturada do roteador."
                         ),
                     )
-                ]
+                ],
+                "debug_errors": [
+                    _build_debug_error(
+                        "tool_executor",
+                        message=(
+                            "Nao foi possivel mapear a decisao do roteador para uma "
+                            "tool executavel."
+                        ),
+                    )
+                ],
             }
 
         resolved_tool_args = _build_router_tool_args(router_decision)
@@ -333,7 +364,16 @@ def build_analytics_graph(
                             f"registrada: {expected_tool_name}."
                         ),
                     )
-                ]
+                ],
+                "debug_errors": [
+                    _build_debug_error(
+                        "tool_executor",
+                        message=(
+                            "A tool esperada pela decisao do roteador nao esta registrada."
+                        ),
+                        tool_name=expected_tool_name,
+                    )
+                ],
             }
 
         try:
@@ -352,9 +392,23 @@ def build_analytics_graph(
                     tool_call_id=expected_tool_name,
                     name=expected_tool_name,
                     status="error",
-                    content=f"Falha temporaria ao executar {expected_tool_name}: {exc}",
+                    content=(
+                        f"Falha temporaria ao executar {expected_tool_name}: "
+                        f"{_stringify_exception(exc)}"
+                    ),
                 )
             )
+            return {
+                "messages": tool_messages,
+                "debug_errors": [
+                    _build_debug_error(
+                        "tool_executor",
+                        message=_stringify_exception(exc),
+                        error_type=type(exc).__name__,
+                        tool_name=expected_tool_name,
+                    )
+                ],
+            }
 
         return {"messages": tool_messages}
 
@@ -400,12 +454,22 @@ def build_analytics_graph(
             except Exception as exc:
                 if is_llm_timeout_error(exc):
                     raise LlmTimeoutError(
-                        "Tempo limite excedido ao sintetizar a resposta final."
+                        "Tempo limite excedido ao sintetizar a resposta final.",
+                        source="insight_synthesizer",
+                        error_type=type(exc).__name__,
+                        debug_message=_stringify_exception(exc),
                     ) from exc
                 return {
                     "messages": [_build_temporary_failure_ai_message()],
                     "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
                     "tools_used": tools_used,
+                    "debug_errors": [
+                        _build_debug_error(
+                            "insight_synthesizer",
+                            message=_stringify_exception(exc),
+                            error_type=type(exc).__name__,
+                        )
+                    ],
                 }
             return {
                 "messages": [synthesized_response],
