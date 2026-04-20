@@ -12,6 +12,7 @@ RouterRefusalReason = Literal[
     "out_of_scope",
     "unsupported_dimension",
     "unsupported_metric",
+    "unsupported_traffic_source",
 ]
 
 

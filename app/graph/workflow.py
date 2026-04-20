@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
+import re
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
@@ -41,12 +42,14 @@ TEMPORARY_LLM_FAILURE_MESSAGE = (
 TEMPORARY_TOOL_FAILURE_MESSAGE = (
     "Nao consegui consultar os dados agora por uma falha temporaria. Tente novamente em instantes."
 )
+DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 class AnalyticsGraphState(TypedDict, total=False):
     question: str
     messages: Annotated[list[AnyMessage], add_messages]
     router_decision: dict[str, Any]
+    resolved_question: str
     turn_start_index: int
     final_answer: str
     tools_used: list[str]
@@ -89,8 +92,24 @@ def _resolve_question(state: AnalyticsGraphState) -> str:
     return ""
 
 
+def _resolve_effective_question(state: AnalyticsGraphState) -> str:
+    resolved_question = state.get("resolved_question", "").strip()
+    if resolved_question:
+        return resolved_question
+    return _resolve_question(state)
+
+
 def _collect_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
     return [message for message in messages if isinstance(message, ToolMessage)]
+
+
+def _get_last_human_question(messages: list[AnyMessage]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            question = _content_to_text(message.content).strip()
+            if question:
+                return question
+    return ""
 
 
 def _resolve_turn_start_index(state: AnalyticsGraphState) -> int:
@@ -211,6 +230,37 @@ def _build_router_tool_args(router_decision: RouterDecision) -> dict[str, Any]:
     }
 
 
+def _question_contains_iso_dates(question: str) -> bool:
+    return bool(DATE_TOKEN_PATTERN.search(question))
+
+
+def _resolve_router_turn(
+    state: AnalyticsGraphState,
+    question: str,
+) -> tuple[str, RouterDecision]:
+    router_decision = build_router_decision(question)
+    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
+
+    if (
+        previous_router_decision is None
+        or not previous_router_decision.needs_clarification
+        or not _question_contains_iso_dates(question)
+        or router_decision.intent != "out_of_scope"
+    ):
+        return question, router_decision
+
+    previous_question = _get_last_human_question(list(state.get("messages", [])))
+    if not previous_question:
+        return question, router_decision
+
+    merged_question = f"{previous_question.rstrip()} {question.strip()}".strip()
+    merged_router_decision = build_router_decision(merged_question)
+    if merged_router_decision.intent == "out_of_scope":
+        return question, router_decision
+
+    return merged_question, merged_router_decision
+
+
 def build_analytics_graph(
     settings: Settings | None = None,
     *,
@@ -228,10 +278,11 @@ def build_analytics_graph(
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
         injected_messages = _build_turn_question_messages(state)
-        router_decision = build_router_decision(question)
+        resolved_question, router_decision = _resolve_router_turn(state, question)
         serialized_router_decision = _serialize_router_decision(router_decision)
         state_update: dict[str, Any] = {
             "router_decision": serialized_router_decision,
+            "resolved_question": resolved_question,
             "turn_start_index": turn_start_index,
         }
 
@@ -326,7 +377,7 @@ def build_analytics_graph(
             }
 
         if tool_messages:
-            question = _resolve_question(state)
+            question = _resolve_effective_question(state)
             tool_context = "\n\n".join(
                 f"Tool: {message.name}\nResultado:\n{_content_to_text(message.content)}"
                 for message in tool_messages

@@ -11,6 +11,7 @@ DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 DIMENSION_REQUEST_PATTERN = re.compile(
     r"\b(?:por|by|per)\s+([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\b"
 )
+SOURCE_FILTER_PATTERN = re.compile(r"\b(?:de|do|da|from)\s+([a-z0-9_]+)\b")
 QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
 SUPPORTED_CHANNEL_TOKENS = frozenset(
     {
@@ -53,8 +54,14 @@ SUPPORTED_PERFORMANCE_METRIC_TOKENS = frozenset(
 SUPPORTED_SOURCE_TOKENS = frozenset(
     {
         "search",
+        "google",
+        "googleads",
+        "google_ads",
+        "adwords",
         "organic",
+        "seo",
         "facebook",
+        "fb",
         "instagram",
     }
 )
@@ -120,6 +127,34 @@ UNSUPPORTED_METRIC_TOKENS = frozenset(
         "companies",
     }
 )
+SOURCE_ALIASES = {
+    "search": "Search",
+    "google": "Search",
+    "googleads": "Search",
+    "google_ads": "Search",
+    "adwords": "Search",
+    "organic": "Organic",
+    "seo": "Organic",
+    "facebook": "Facebook",
+    "fb": "Facebook",
+    "instagram": "Instagram",
+}
+SOURCE_FILTER_IGNORED_TOKENS = frozenset(
+    SUPPORTED_CHANNEL_TOKENS
+    | SUPPORTED_VOLUME_SIGNAL_TOKENS
+    | SUPPORTED_USER_METRIC_TOKENS
+    | SUPPORTED_PERFORMANCE_METRIC_TOKENS
+    | {
+        "midia",
+        "media",
+        "growth",
+        "origem",
+        "origens",
+        "source",
+        "sources",
+        "traffic_source",
+    }
+)
 
 MISSING_DATES_MESSAGE = (
     "Preciso que voce informe start_date e end_date no formato YYYY-MM-DD para eu "
@@ -128,6 +163,11 @@ MISSING_DATES_MESSAGE = (
 INVALID_DATES_MESSAGE = (
     "As datas informadas sao invalidas. Use start_date e end_date reais no formato "
     "YYYY-MM-DD, por exemplo 2024-01-01 ate 2024-01-31."
+)
+UNSUPPORTED_METRIC_MESSAGE = (
+    "No MVP atual eu so consigo analisar volume de trafego, pedidos e receita por "
+    "canal com base no schema disponivel. Reformule a pergunta sem metricas como "
+    "ROAS, CAC, CTR ou outras metricas que nao existem no dataset atual."
 )
 UNSUPPORTED_DIMENSION_MESSAGE = (
     "No MVP atual eu so consigo analisar trafego, pedidos e receita por canal "
@@ -142,6 +182,15 @@ OUT_OF_SCOPE_MESSAGE = (
     "no dataset atual. Reformule a pergunta nesse escopo e, quando a consulta "
     "depender de dados, informe start_date e end_date em YYYY-MM-DD."
 )
+
+
+def _build_unsupported_traffic_source_message(source_token: str) -> str:
+    humanized_source = source_token.replace("_", " ").title()
+    return (
+        f"No MVP atual eu nao consigo filtrar pelo canal {humanized_source}. "
+        "Use um canal suportado como Search, Organic, Facebook ou Instagram, "
+        "ou remova o filtro especifico para comparar os canais no periodo."
+    )
 
 
 def _normalize_text(value: str) -> str:
@@ -182,23 +231,39 @@ def _extract_question_tokens(question: str) -> set[str]:
     return set(QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)))
 
 
+def _extract_source_filter_tokens(question: str) -> list[str]:
+    return SOURCE_FILTER_PATTERN.findall(_normalize_text(question))
+
+
 def _extract_normalized_traffic_source(question: str) -> str | None:
-    source_aliases = {
-        "search": "Search",
-        "organic": "Organic",
-        "facebook": "Facebook",
-        "instagram": "Instagram",
-    }
     found_sources: list[str] = []
 
     for token in QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)):
-        normalized_source = source_aliases.get(token)
+        normalized_source = SOURCE_ALIASES.get(token)
         if normalized_source is None or normalized_source in found_sources:
             continue
         found_sources.append(normalized_source)
 
     if len(found_sources) == 1:
         return found_sources[0]
+
+    return None
+
+
+def _extract_unknown_traffic_source(question: str) -> str | None:
+    unknown_sources: list[str] = []
+
+    for token in _extract_source_filter_tokens(question):
+        if token in SOURCE_FILTER_IGNORED_TOKENS:
+            continue
+        if token in SOURCE_ALIASES:
+            continue
+        if token in unknown_sources:
+            continue
+        unknown_sources.append(token)
+
+    if len(unknown_sources) == 1:
+        return unknown_sources[0]
 
     return None
 
@@ -225,10 +290,8 @@ def _question_supports_date_clarification(question: str) -> bool:
     if _question_requests_unsupported_dimension(question):
         return False
 
-    has_performance_metric = bool(
-        question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS
-    )
     has_user_metric = bool(question_tokens & SUPPORTED_USER_METRIC_TOKENS)
+    has_volume_signal = bool(question_tokens & SUPPORTED_VOLUME_SIGNAL_TOKENS)
     has_channel_context = bool(
         question_tokens
         & (
@@ -238,7 +301,7 @@ def _question_supports_date_clarification(question: str) -> bool:
         )
     )
 
-    return has_performance_metric or (has_user_metric and has_channel_context)
+    return (has_user_metric or has_volume_signal) and has_channel_context
 
 
 def _question_is_supported_channel_comparison(question: str) -> bool:
@@ -321,7 +384,18 @@ def build_router_decision(question: str) -> RouterDecision:
             intent="out_of_scope",
             normalized_params=normalized_params,
             refusal_reason="unsupported_metric",
-            response_message=UNSUPPORTED_DIMENSION_MESSAGE,
+            response_message=UNSUPPORTED_METRIC_MESSAGE,
+        )
+
+    unknown_traffic_source = _extract_unknown_traffic_source(question)
+    if unknown_traffic_source is not None:
+        return RouterDecision(
+            intent="out_of_scope",
+            normalized_params=normalized_params,
+            refusal_reason="unsupported_traffic_source",
+            response_message=_build_unsupported_traffic_source_message(
+                unknown_traffic_source
+            ),
         )
 
     if intent == "out_of_scope":
@@ -374,5 +448,6 @@ __all__ = [
     "MISSING_DATES_MESSAGE",
     "OUT_OF_SCOPE_MESSAGE",
     "UNSUPPORTED_DIMENSION_MESSAGE",
+    "UNSUPPORTED_METRIC_MESSAGE",
     "build_router_decision",
 ]
