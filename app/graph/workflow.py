@@ -16,17 +16,14 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Command
 
 from app.graph.llm import (
     LlmTimeoutError,
     build_analytics_llm,
-    build_tool_enabled_llm,
     is_llm_timeout_error,
 )
-from app.graph.prompts import (
-    FINAL_RESPONSE_SYSTEM_PROMPT,
-    build_conversation_system_prompt,
-)
+from app.graph.prompts import FINAL_RESPONSE_SYSTEM_PROMPT
 from app.graph.router import (
     EMPTY_QUESTION_MESSAGE,
     INVALID_DATES_MESSAGE,
@@ -49,8 +46,7 @@ TEMPORARY_TOOL_FAILURE_MESSAGE = (
 class AnalyticsGraphState(TypedDict, total=False):
     question: str
     messages: Annotated[list[AnyMessage], add_messages]
-    router_decision: RouterDecision
-    next_step: Literal["conversation", "tools", "final_response"]
+    router_decision: dict[str, Any]
     turn_start_index: int
     final_answer: str
     tools_used: list[str]
@@ -91,13 +87,6 @@ def _resolve_question(state: AnalyticsGraphState) -> str:
                 return content
 
     return ""
-
-
-def _get_last_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            return message
-    return None
 
 
 def _collect_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
@@ -174,112 +163,151 @@ def _build_temporary_failure_ai_message() -> AIMessage:
     return AIMessage(content=TEMPORARY_LLM_FAILURE_MESSAGE)
 
 
+def _serialize_router_decision(router_decision: RouterDecision) -> dict[str, Any]:
+    return router_decision.model_dump(mode="json")
+
+
+def _deserialize_router_decision(
+    router_decision: dict[str, Any] | RouterDecision | None,
+) -> RouterDecision | None:
+    if router_decision is None:
+        return None
+    if isinstance(router_decision, RouterDecision):
+        return router_decision
+    return RouterDecision.model_validate(router_decision)
+
+
+def _router_decision_short_circuits(router_decision: RouterDecision) -> bool:
+    return (
+        router_decision.needs_clarification
+        or router_decision.refusal_reason is not None
+    )
+
+
+def _resolve_expected_tool_name(router_decision: RouterDecision | None) -> str | None:
+    if router_decision is None:
+        return None
+    if router_decision.intent == "traffic_volume":
+        return "traffic_volume_analyzer"
+    if router_decision.intent == "channel_performance":
+        return "channel_performance_analyzer"
+    return None
+
+
+def _build_router_tool_args(router_decision: RouterDecision) -> dict[str, Any]:
+    normalized_params = router_decision.normalized_params
+    return {
+        "traffic_source": normalized_params.traffic_source,
+        "start_date": (
+            normalized_params.start_date.isoformat()
+            if normalized_params.start_date is not None
+            else None
+        ),
+        "end_date": (
+            normalized_params.end_date.isoformat()
+            if normalized_params.end_date is not None
+            else None
+        ),
+    }
+
+
 def build_analytics_graph(
     settings: Settings | None = None,
     *,
-    tool_enabled_llm: Any | None = None,
     response_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
     checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
     tools_by_name = {tool.name: tool for tool in analytics_tools}
-    conversation_llm = tool_enabled_llm or build_tool_enabled_llm(settings)
     synthesis_llm = response_llm or build_analytics_llm(settings)
-    conversation_system_prompt = build_conversation_system_prompt()
 
-    def router_node(state: AnalyticsGraphState) -> dict[str, Any]:
+    def router_node(
+        state: AnalyticsGraphState,
+    ) -> Command[Literal["tool_executor", "insight_synthesizer"]]:
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
         injected_messages = _build_turn_question_messages(state)
         router_decision = build_router_decision(question)
-
-        if router_decision.needs_clarification or router_decision.refusal_reason is not None:
-            return {
-                "messages": injected_messages,
-                "router_decision": router_decision,
-                "final_answer": router_decision.response_message or EMPTY_QUESTION_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
-        return {
-            "router_decision": router_decision,
-            "next_step": "conversation",
+        serialized_router_decision = _serialize_router_decision(router_decision)
+        state_update: dict[str, Any] = {
+            "router_decision": serialized_router_decision,
             "turn_start_index": turn_start_index,
         }
 
-    def conversation_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        existing_messages = list(state.get("messages", []))
-        injected_messages = _build_turn_question_messages(state)
-
         if injected_messages:
-            existing_messages = [*existing_messages, *injected_messages]
+            state_update["messages"] = injected_messages
 
-        try:
-            response = cast(
-                AIMessage,
-                conversation_llm.invoke(
-                    [SystemMessage(content=conversation_system_prompt), *existing_messages]
-                ),
+        if _router_decision_short_circuits(router_decision):
+            state_update["final_answer"] = (
+                router_decision.response_message or EMPTY_QUESTION_MESSAGE
             )
-        except Exception as exc:
-            if is_llm_timeout_error(exc):
-                raise LlmTimeoutError("Tempo limite excedido ao consultar o LLM.") from exc
-            return {
-                "messages": [*injected_messages, _build_temporary_failure_ai_message()],
-                "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-            }
+            return Command(update=state_update, goto="insight_synthesizer")
 
-        return {"messages": [*injected_messages, response]}
+        return Command(update=state_update, goto="tool_executor")
 
-    def execute_tools_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        messages = list(state.get("messages", []))
-        last_ai_message = _get_last_ai_message(messages)
-        if last_ai_message is None or not last_ai_message.tool_calls:
-            return {}
+    def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
+        router_decision = _deserialize_router_decision(state.get("router_decision"))
 
         tool_messages: list[ToolMessage] = []
+        expected_tool_name = _resolve_expected_tool_name(router_decision)
 
-        for tool_call in last_ai_message.tool_calls:
-            tool_name = tool_call["name"]
-            tool_call_id = str(tool_call.get("id") or tool_name)
-            tool = tools_by_name.get(tool_name)
-
-            if tool is None:
-                tool_messages.append(
+        if router_decision is None or expected_tool_name is None:
+            return {
+                "messages": [
                     ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
+                        tool_call_id="router-decision-missing",
+                        name="unknown",
                         status="error",
-                        content=f"Tool desconhecida solicitada pelo modelo: {tool_name}.",
+                        content=(
+                            "Nao foi possivel resolver uma tool a partir da decisao "
+                            "estruturada do roteador."
+                        ),
                     )
-                )
-                continue
+                ]
+            }
 
-            try:
-                result = tool.invoke(tool_call)
-                tool_messages.append(
+        resolved_tool_args = _build_router_tool_args(router_decision)
+        tool = tools_by_name.get(expected_tool_name)
+
+        if tool is None:
+            return {
+                "messages": [
                     ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
-                        content=_serialize_tool_result(result),
-                        artifact=result,
-                    )
-                )
-            except Exception as exc:
-                tool_messages.append(
-                    ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
+                        tool_call_id=expected_tool_name,
+                        name=expected_tool_name,
                         status="error",
-                        content=f"Falha temporaria ao executar {tool_name}: {exc}",
+                        content=(
+                            "A tool esperada pela decisao do roteador nao esta "
+                            f"registrada: {expected_tool_name}."
+                        ),
                     )
+                ]
+            }
+
+        try:
+            result = tool.invoke(resolved_tool_args)
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=expected_tool_name,
+                    name=expected_tool_name,
+                    content=_serialize_tool_result(result),
+                    artifact=result,
                 )
+            )
+        except Exception as exc:
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=expected_tool_name,
+                    name=expected_tool_name,
+                    status="error",
+                    content=f"Falha temporaria ao executar {expected_tool_name}: {exc}",
+                )
+            )
 
         return {"messages": tool_messages}
 
-    def final_response_node(state: AnalyticsGraphState) -> dict[str, Any]:
+    def insight_synthesizer_node(state: AnalyticsGraphState) -> dict[str, Any]:
         current_turn_messages = _get_current_turn_messages(state)
         tools_used = _collect_tools_used(current_turn_messages)
         preset_answer = state.get("final_answer")
@@ -334,69 +362,19 @@ def build_analytics_graph(
                 "tools_used": tools_used,
             }
 
-        last_ai_message = _get_last_ai_message(current_turn_messages)
-        if last_ai_message is None:
-            return {
-                "final_answer": EMPTY_QUESTION_MESSAGE,
-                "tools_used": tools_used,
-            }
-
         return {
-            "final_answer": _content_to_text(last_ai_message.content).strip(),
+            "final_answer": TEMPORARY_TOOL_FAILURE_MESSAGE,
             "tools_used": tools_used,
         }
 
-    def route_after_router(
-        state: AnalyticsGraphState,
-    ) -> Literal["conversation", "final_response"]:
-        router_decision = state.get("router_decision")
-        if (
-            router_decision is not None
-            and (
-                router_decision.needs_clarification
-                or router_decision.refusal_reason is not None
-            )
-        ):
-            return "final_response"
-
-        return cast(
-            Literal["conversation", "final_response"],
-            state.get("next_step", "final_response"),
-        )
-
-    def route_after_conversation(
-        state: AnalyticsGraphState,
-    ) -> Literal["tools", "final_response"]:
-        last_ai_message = _get_last_ai_message(list(state.get("messages", [])))
-        if last_ai_message and last_ai_message.tool_calls:
-            return "tools"
-        return "final_response"
-
     graph = StateGraph(AnalyticsGraphState)
     graph.add_node("router", router_node)
-    graph.add_node("conversation", conversation_node)
-    graph.add_node("tools", execute_tools_node)
-    graph.add_node("final_response", final_response_node)
+    graph.add_node("tool_executor", tool_executor_node)
+    graph.add_node("insight_synthesizer", insight_synthesizer_node)
 
     graph.add_edge(START, "router")
-    graph.add_conditional_edges(
-        "router",
-        route_after_router,
-        {
-            "conversation": "conversation",
-            "final_response": "final_response",
-        },
-    )
-    graph.add_conditional_edges(
-        "conversation",
-        route_after_conversation,
-        {
-            "tools": "tools",
-            "final_response": "final_response",
-        },
-    )
-    graph.add_edge("tools", "final_response")
-    graph.add_edge("final_response", END)
+    graph.add_edge("tool_executor", "insight_synthesizer")
+    graph.add_edge("insight_synthesizer", END)
 
     return graph.compile(checkpointer=checkpointer)
 

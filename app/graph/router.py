@@ -58,6 +58,16 @@ SUPPORTED_SOURCE_TOKENS = frozenset(
         "instagram",
     }
 )
+SUPPORTED_COMPARISON_TOKENS = frozenset(
+    {
+        "compare",
+        "comparar",
+        "comparacao",
+        "comparison",
+        "versus",
+        "vs",
+    }
+)
 SUPPORTED_ANALYTICS_DIMENSION_TOKENS = frozenset(
     {
         "canal",
@@ -231,6 +241,16 @@ def _question_supports_date_clarification(question: str) -> bool:
     return has_performance_metric or (has_user_metric and has_channel_context)
 
 
+def _question_is_supported_channel_comparison(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    has_comparison_signal = bool(question_tokens & SUPPORTED_COMPARISON_TOKENS)
+    supported_sources_mentioned = question_tokens & SUPPORTED_SOURCE_TOKENS
+    return has_comparison_signal and len(supported_sources_mentioned) >= 2
+
+
 def _resolve_router_intent(question: str) -> Literal[
     "traffic_volume", "channel_performance", "out_of_scope"
 ]:
@@ -243,6 +263,9 @@ def _resolve_router_intent(question: str) -> Literal[
 
     if question_tokens & UNSUPPORTED_METRIC_TOKENS:
         return "out_of_scope"
+
+    if _question_is_supported_channel_comparison(question):
+        return "channel_performance"
 
     if question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS:
         return "channel_performance"
