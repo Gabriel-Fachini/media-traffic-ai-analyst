@@ -44,8 +44,20 @@ def build_scenarios() -> list[RouterDateScenario]:
             expected_end_date=date(2026, 4, 19),
         ),
         RouterDateScenario(
+            name="ultimo-mes-com-do",
+            question="Qual foi a receita do Search do ultimo mes?",
+            expected_start_date=date(2026, 3, 1),
+            expected_end_date=date(2026, 3, 31),
+        ),
+        RouterDateScenario(
             name="datas-brasileiras",
             question="Qual foi a receita de Search entre 01/04/2026 e 20/04/2026?",
+            expected_start_date=date(2026, 4, 1),
+            expected_end_date=date(2026, 4, 20),
+        ),
+        RouterDateScenario(
+            name="datas-brasileiras-com-de",
+            question="Qual foi a receita do Search de 01/04/26 a 20/04/26?",
             expected_start_date=date(2026, 4, 1),
             expected_end_date=date(2026, 4, 20),
         ),
@@ -81,6 +93,11 @@ def _assert_valid_range(scenario: RouterDateScenario) -> None:
         raise AssertionError(
             f"{scenario.name}: nao deveria pedir clarificacao. "
             f"Recebido={decision.response_message!r}"
+        )
+    if decision.refusal_reason is not None:
+        raise AssertionError(
+            f"{scenario.name}: nao deveria recusar a pergunta. "
+            f"Recebido={decision.refusal_reason!r}"
         )
     if actual_start_date != scenario.expected_start_date:
         raise AssertionError(

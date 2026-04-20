@@ -19,6 +19,28 @@ YESTERDAY_PATTERN = re.compile(r"\bontem\b")
 THIS_MONTH_PATTERN = re.compile(r"\beste\s+mes\b")
 LAST_MONTH_PATTERN = re.compile(r"\bultimo\s+mes\b")
 LAST_N_DAYS_PATTERN = re.compile(r"\bultimos?\s+(\d+)\s+dias?\b")
+TEMPORAL_CONTEXT_PATTERN = re.compile(
+    r"\b(?:entre|from)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\s+(?:e|a|ate|to)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\b"
+    r"|\b(?:entre|from)\s+\d{4}-\d{2}-\d{2}\s+(?:e|a|ate|to)\s+\d{4}-\d{2}-\d{2}\b"
+    r"|\b(?:em|in|on|de|do|da|from)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\b"
+    r"|\b(?:em|in|on|de|do|da|from)\s+\d{4}-\d{2}-\d{2}\b"
+    r"|\b(?:no|na|nos|nas|em|in)\s+ultimo\s+mes\b"
+    r"|\b(?:no|na|nos|nas|em|in)\s+este\s+mes\b"
+    r"|\b(?:nos|nas|em|in)\s+ultimos?\s+\d+\s+dias?\b"
+    r"|\bontem\b",
+    re.IGNORECASE,
+)
+TEMPORAL_SOURCE_FILTER_IGNORED_TOKENS = frozenset(
+    {
+        "ontem",
+        "este",
+        "esta",
+        "ultimo",
+        "ultima",
+        "ultimos",
+        "ultimas",
+    }
+)
 SUPPORTED_CHANNEL_TOKENS = frozenset(
     {
         "canal",
@@ -336,7 +358,7 @@ def _extract_relative_date_range(
         return None, invalid_tokens
 
     relative_matches.sort(key=lambda item: item[0])
-    return relative_matches[0][1], invalid_tokens
+    return relative_matches[-1][1], invalid_tokens
 
 
 def _extract_question_tokens(question: str) -> set[str]:
@@ -362,7 +384,7 @@ def _extract_source_filter_tokens(question: str) -> list[str]:
     return SOURCE_FILTER_PATTERN.findall(_normalize_text(question))
 
 
-def _extract_normalized_traffic_source(question: str) -> str | None:
+def _extract_traffic_sources(question: str) -> list[str]:
     found_sources: list[str] = []
 
     for token in QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)):
@@ -370,6 +392,12 @@ def _extract_normalized_traffic_source(question: str) -> str | None:
         if normalized_source is None or normalized_source in found_sources:
             continue
         found_sources.append(normalized_source)
+
+    return found_sources
+
+
+def _extract_normalized_traffic_source(question: str) -> str | None:
+    found_sources = _extract_traffic_sources(question)
 
     if len(found_sources) == 1:
         return found_sources[0]
@@ -382,6 +410,10 @@ def _extract_unknown_traffic_source(question: str) -> str | None:
 
     for token in _extract_source_filter_tokens(question):
         if token in SOURCE_FILTER_IGNORED_TOKENS:
+            continue
+        if token.isdigit():
+            continue
+        if token in TEMPORAL_SOURCE_FILTER_IGNORED_TOKENS:
             continue
         if token in SOURCE_ALIASES:
             continue
@@ -448,6 +480,21 @@ def question_is_metric_clarification_follow_up(question: str) -> bool:
     if not question_tokens or len(question_tokens) > 4:
         return False
     return _question_contains_metric_follow_up_signal(question)
+
+
+def question_introduces_new_traffic_source(
+    question: str,
+    *,
+    previous_traffic_source: str | None = None,
+) -> bool:
+    question_sources = _extract_traffic_sources(question)
+    if not question_sources:
+        return False
+
+    if previous_traffic_source is None:
+        return True
+
+    return set(question_sources) != {previous_traffic_source}
 
 
 def _question_is_supported_channel_comparison(question: str) -> bool:
@@ -547,6 +594,13 @@ def question_contains_temporal_signal(question: str) -> bool:
     )
 
 
+def strip_temporal_context(question: str) -> str:
+    stripped_question = TEMPORAL_CONTEXT_PATTERN.sub(" ", question)
+    stripped_question = re.sub(r"\s+", " ", stripped_question)
+    stripped_question = re.sub(r"\s+([?.!,;:])", r"\1", stripped_question)
+    return stripped_question.strip()
+
+
 def _format_guided_subject(normalized_params: RouterNormalizedParams) -> str:
     if normalized_params.traffic_source is not None:
         return f"o canal {normalized_params.traffic_source}"
@@ -632,6 +686,21 @@ def build_router_decision(
             ),
         )
 
+    valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
+    _, invalid_relative_tokens = _extract_relative_date_range(
+        question,
+        reference_date=resolved_reference_date,
+    )
+    all_invalid_dates = [*invalid_dates, *invalid_relative_tokens]
+    if all_invalid_dates:
+        return RouterDecision(
+            intent=intent,
+            normalized_params=normalized_params,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
     if intent == "ambiguous_analytics":
         return RouterDecision(
             intent="ambiguous_analytics",
@@ -649,21 +718,6 @@ def build_router_decision(
             normalized_params=normalized_params,
             refusal_reason="out_of_scope",
             response_message=OUT_OF_SCOPE_MESSAGE,
-        )
-
-    valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
-    _, invalid_relative_tokens = _extract_relative_date_range(
-        question,
-        reference_date=resolved_reference_date,
-    )
-    all_invalid_dates = [*invalid_dates, *invalid_relative_tokens]
-    if all_invalid_dates:
-        return RouterDecision(
-            intent=intent,
-            normalized_params=normalized_params,
-            needs_clarification=True,
-            clarification_reason="invalid_dates",
-            response_message=INVALID_DATES_MESSAGE,
         )
 
     has_complete_date_range = (
@@ -704,6 +758,8 @@ __all__ = [
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "UNSUPPORTED_METRIC_MESSAGE",
     "build_router_decision",
+    "question_introduces_new_traffic_source",
     "question_is_metric_clarification_follow_up",
     "question_contains_temporal_signal",
+    "strip_temporal_context",
 ]

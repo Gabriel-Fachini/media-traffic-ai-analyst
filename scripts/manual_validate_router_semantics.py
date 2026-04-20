@@ -68,6 +68,13 @@ def build_scenarios() -> list[RouterSemanticScenario]:
             expected_end_date=date(2026, 4, 19),
             expected_message_fragment="os canais",
         ),
+        RouterSemanticScenario(
+            name="guided-clarification-invalid-date-priority",
+            question="Como o Search performou em 31/02/2026?",
+            expected_intent="ambiguous_analytics",
+            expected_clarification_reason="invalid_dates",
+            expected_traffic_source="Search",
+        ),
     ]
 
 

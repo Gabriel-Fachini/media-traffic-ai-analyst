@@ -31,8 +31,10 @@ from app.graph.router import (
     OUT_OF_SCOPE_MESSAGE,
     UNSUPPORTED_DIMENSION_MESSAGE,
     build_router_decision,
+    question_introduces_new_traffic_source,
     question_is_metric_clarification_follow_up,
     question_contains_temporal_signal,
+    strip_temporal_context,
 )
 from app.schemas.router import RouterDecision
 from app.graph.tools import get_analytics_tools
@@ -257,19 +259,38 @@ def _resolve_router_turn(
 ) -> tuple[str, RouterDecision]:
     router_decision = build_router_decision(question)
     previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
+    follow_up_changes_traffic_source = (
+        previous_router_decision is not None
+        and question_introduces_new_traffic_source(
+            question,
+            previous_traffic_source=(
+                previous_router_decision.normalized_params.traffic_source
+            ),
+        )
+    )
 
     should_merge_temporal_follow_up = (
         previous_router_decision is not None
         and previous_router_decision.needs_clarification
         and previous_router_decision.clarification_reason in {"missing_dates", "invalid_dates"}
         and question_contains_temporal_signal(question)
-        and router_decision.intent == "out_of_scope"
+        and not follow_up_changes_traffic_source
+        and (
+            (
+                previous_router_decision.clarification_reason == "invalid_dates"
+                and previous_router_decision.intent == "ambiguous_analytics"
+            )
+            or
+            router_decision.intent in {"out_of_scope", "ambiguous_analytics"}
+            or router_decision.intent == previous_router_decision.intent
+        )
     )
     should_merge_metric_follow_up = (
         previous_router_decision is not None
         and previous_router_decision.needs_clarification
         and previous_router_decision.clarification_reason == "ambiguous_metric"
         and question_is_metric_clarification_follow_up(question)
+        and not follow_up_changes_traffic_source
     )
 
     if (
@@ -282,7 +303,14 @@ def _resolve_router_turn(
     if not previous_question:
         return question, router_decision
 
-    merged_question = f"{previous_question.rstrip()} {question.strip()}".strip()
+    previous_question_for_merge = previous_question
+    if previous_router_decision is not None:
+        if previous_router_decision.clarification_reason == "invalid_dates":
+            previous_question_for_merge = strip_temporal_context(previous_question)
+
+    merged_question = (
+        f"{previous_question_for_merge.rstrip()} {question.strip()}".strip()
+    )
     merged_router_decision = build_router_decision(merged_question)
     if (
         merged_router_decision.intent == "out_of_scope"

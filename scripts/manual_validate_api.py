@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, timedelta
 import json
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -9,6 +10,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from app.graph.llm import LlmTimeoutError
+from app.graph.router import INVALID_DATES_MESSAGE
 from app.main import LLM_TIMEOUT_ERROR_MESSAGE, app, get_query_graph
 from app.schemas.api import QueryResponse
 from app.graph.workflow import MISSING_DATES_MESSAGE, UNSUPPORTED_DIMENSION_MESSAGE
@@ -122,6 +124,17 @@ def build_scenarios(*, show_body: bool) -> list[ValidationScenario]:
             ),
         ),
         ValidationScenario(
+            name="clarification-follow-up-restated-metric-date",
+            description=(
+                "Valida que um follow-up como 'receita ontem' preserva o escopo "
+                "anterior em vez de perder o filtro de canal."
+            ),
+            runner=lambda client: run_clarification_follow_up_restated_metric_date(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
             name="guided-clarification-ambiguous-request",
             description=(
                 "Valida que uma pergunta provavelmente valida, mas ambigua, vira "
@@ -133,12 +146,56 @@ def build_scenarios(*, show_body: bool) -> list[ValidationScenario]:
             ),
         ),
         ValidationScenario(
+            name="guided-clarification-invalid-date-priority",
+            description=(
+                "Valida que datas invalidas em pergunta ambigua priorizam "
+                "invalid_dates antes da clarificacao de metrica."
+            ),
+            runner=lambda client: run_guided_clarification_invalid_date_priority(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
             name="guided-clarification-follow-up-metric-only",
             description=(
                 "Valida que uma resposta curta como 'receita' reaproveita a "
                 "clarificacao guiada anterior no mesmo thread_id."
             ),
             runner=lambda client: run_guided_clarification_follow_up_metric_only(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="guided-clarification-follow-up-latest-relative-period",
+            description=(
+                "Valida que o periodo relativo mais recente do follow-up "
+                "sobrepoe o periodo anterior da pergunta ambigua."
+            ),
+            runner=lambda client: run_guided_clarification_follow_up_latest_relative_period(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="guided-clarification-follow-up-source-change",
+            description=(
+                "Valida que um follow-up curto trocando o canal vira uma nova "
+                "pergunta, sem reaproveitar o escopo anterior."
+            ),
+            runner=lambda client: run_guided_clarification_follow_up_source_change(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="invalid-dates-follow-up-corrected-period",
+            description=(
+                "Valida que um follow-up apos invalid_dates substitui o periodo "
+                "invalido anterior ao montar a pergunta resolvida."
+            ),
+            runner=lambda client: run_invalid_dates_follow_up_corrected_period(
                 client,
                 show_body=show_body,
             ),
@@ -235,6 +292,23 @@ def assert_status_code(response: Any, expected_status_code: int) -> None:
 
 def parse_query_response(response: Any) -> QueryResponse:
     return QueryResponse.model_validate(response.json())
+
+
+def _get_debug_payload(body: QueryResponse) -> dict[str, Any]:
+    if body.metadata is None or body.metadata.debug is None:
+        raise AssertionError("Debug metadata ausente; execute o request com X-Debug.")
+
+    router_decision = body.metadata.debug.router_decision
+    if router_decision is None:
+        raise AssertionError("router_decision ausente no payload de debug.")
+
+    return router_decision
+
+
+def _last_month_range(reference_date: date) -> tuple[date, date]:
+    current_month_start = reference_date.replace(day=1)
+    last_month_end = current_month_start - timedelta(days=1)
+    return last_month_end.replace(day=1), last_month_end
 
 
 def run_health_check(client: TestClient, *, show_body: bool) -> None:
@@ -633,6 +707,72 @@ def run_clarification_follow_up_relative_date_only(
     print_check("follow-up relativo retornou resposta final nao vazia")
 
 
+def run_clarification_follow_up_restated_metric_date(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Qual foi a receita de Search?",
+    }
+    print_step("Primeira chamada sem datas para abrir clarificacao")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if first_body.answer != MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A primeira chamada deveria retornar a mensagem de clarificacao de datas. "
+            f"Recebido={first_body.answer!r}"
+        )
+    print_check("primeira chamada retornou a clarificacao esperada")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "receita ontem",
+    }
+    print_step("Segunda chamada reafirma a metrica junto com o periodo")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post(
+        "/query",
+        json=second_payload,
+        headers={"X-Debug": "true"},
+    )
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+    router_decision = _get_debug_payload(second_body)
+    normalized_params = router_decision["normalized_params"]
+
+    if "channel_performance_analyzer" not in second_body.tools_used:
+        raise AssertionError(
+            "O follow-up com 'receita ontem' deveria reaproveitar o contexto e "
+            f"acionar channel_performance_analyzer. Recebido={second_body.tools_used}"
+        )
+    print_check("follow-up com metrica reafirmada acionou channel_performance_analyzer")
+    if normalized_params.get("traffic_source") != "Search":
+        raise AssertionError(
+            "O follow-up nao preservou o filtro Search da pergunta original. "
+            f"Recebido={normalized_params}"
+        )
+    print_check("router preservou traffic_source=Search no follow-up")
+    if second_body.metadata is None or second_body.metadata.debug is None:
+        raise AssertionError("Metadata de debug ausente no follow-up com metrica.")
+    if second_body.metadata.debug.resolved_question != "Qual foi a receita de Search? receita ontem":
+        raise AssertionError(
+            "A pergunta resolvida nao refletiu o merge esperado. "
+            f"Recebido={second_body.metadata.debug.resolved_question!r}"
+        )
+    print_check("resolved_question mostrou o merge esperado do follow-up")
+
+
 def run_guided_clarification_ambiguous_request(
     client: TestClient,
     *,
@@ -670,6 +810,35 @@ def run_guided_clarification_ambiguous_request(
             "A pergunta ambigua nao deveria cair em out_of_scope."
         )
     print_check("pergunta ambigua virou clarificacao guiada")
+
+
+def run_guided_clarification_invalid_date_priority(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    payload = {"question": "Como o Search performou em 31/02/2026?"}
+    print_step("Chamando /query com pergunta ambigua e data invalida")
+    print_request("POST", "/query", payload)
+    response = client.post("/query", json=payload)
+    print_http_response(response)
+    assert_status_code(response, 200)
+    print_check("status code 200 confirmado")
+    body = parse_query_response(response)
+
+    if body.answer != INVALID_DATES_MESSAGE:
+        raise AssertionError(
+            "Perguntas ambiguas com data invalida deveriam priorizar invalid_dates. "
+            f"Recebido={body.answer!r}"
+        )
+    print_check("invalid_dates teve precedencia sobre ambiguous_metric")
+    if body.tools_used:
+        raise AssertionError(
+            "Nenhuma tool deveria rodar quando a data ainda e invalida. "
+            f"Recebido={body.tools_used}"
+        )
+    print_check("tools_used veio vazio para data invalida")
 
 
 def run_guided_clarification_follow_up_metric_only(
@@ -739,6 +908,214 @@ def run_guided_clarification_follow_up_metric_only(
     if not second_body.answer.strip():
         raise AssertionError("A resposta final do follow-up veio vazia.")
     print_check("follow-up guiado retornou resposta final nao vazia")
+
+
+def run_invalid_dates_follow_up_corrected_period(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Como o Search performou em 31/02/2026?",
+    }
+    print_step("Primeira chamada dispara invalid_dates em pergunta ambigua")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if first_body.answer != INVALID_DATES_MESSAGE:
+        raise AssertionError(
+            "A primeira chamada deveria priorizar invalid_dates. "
+            f"Recebido={first_body.answer!r}"
+        )
+    print_check("primeira chamada retornou invalid_dates")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "receita ontem",
+    }
+    print_step("Segunda chamada corrige o periodo e escolhe a metrica")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post(
+        "/query",
+        json=second_payload,
+        headers={"X-Debug": "true"},
+    )
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+    router_decision = _get_debug_payload(second_body)
+    normalized_params = router_decision["normalized_params"]
+
+    if "channel_performance_analyzer" not in second_body.tools_used:
+        raise AssertionError(
+            "O follow-up apos invalid_dates deveria corrigir o periodo e acionar "
+            f"channel_performance_analyzer. Recebido={second_body.tools_used}"
+        )
+    print_check("follow-up apos invalid_dates acionou channel_performance_analyzer")
+    if normalized_params.get("traffic_source") != "Search":
+        raise AssertionError(
+            "O canal Search deveria ser preservado apos corrigir o periodo. "
+            f"Recebido={normalized_params}"
+        )
+    if normalized_params.get("start_date") != _today_minus_days(1).isoformat():
+        raise AssertionError(
+            "start_date inesperada apos corrigir o periodo com 'ontem'. "
+            f"Recebido={normalized_params}"
+        )
+    if normalized_params.get("end_date") != _today_minus_days(1).isoformat():
+        raise AssertionError(
+            "end_date inesperada apos corrigir o periodo com 'ontem'. "
+            f"Recebido={normalized_params}"
+        )
+    if second_body.metadata is None or second_body.metadata.debug is None:
+        raise AssertionError("Metadata de debug ausente no follow-up de invalid_dates.")
+    if "31/02/2026" in (second_body.metadata.debug.resolved_question or ""):
+        raise AssertionError(
+            "A pergunta resolvida ainda contem a data invalida anterior, o que "
+            "quebraria a correcao via follow-up. "
+            f"Recebido={second_body.metadata.debug.resolved_question!r}"
+        )
+    print_check("resolved_question removeu o periodo invalido anterior antes do merge")
+
+
+def _today_minus_days(day_count: int) -> date:
+    return date.today() - timedelta(days=day_count)
+
+
+def run_guided_clarification_follow_up_latest_relative_period(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Como o Search performou ontem?",
+    }
+    print_step("Primeira chamada dispara clarificacao guiada com periodo inicial")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "receita no ultimo mes",
+    }
+    print_step("Segunda chamada escolhe a metrica e substitui o periodo anterior")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post(
+        "/query",
+        json=second_payload,
+        headers={"X-Debug": "true"},
+    )
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+    router_decision = _get_debug_payload(second_body)
+    normalized_params = router_decision["normalized_params"]
+    expected_start_date, expected_end_date = _last_month_range(date.today())
+
+    if "channel_performance_analyzer" not in second_body.tools_used:
+        raise AssertionError(
+            "O follow-up com periodo relativo mais recente deveria acionar "
+            f"channel_performance_analyzer. Recebido={second_body.tools_used}"
+        )
+    print_check("follow-up com novo periodo relativo acionou channel_performance_analyzer")
+    if normalized_params.get("traffic_source") != "Search":
+        raise AssertionError(
+            "O follow-up deveria preservar traffic_source=Search. "
+            f"Recebido={normalized_params}"
+        )
+    if normalized_params.get("start_date") != expected_start_date.isoformat():
+        raise AssertionError(
+            "O router nao priorizou o periodo relativo mais recente para start_date. "
+            f"Esperado={expected_start_date.isoformat()}, recebido={normalized_params}"
+        )
+    if normalized_params.get("end_date") != expected_end_date.isoformat():
+        raise AssertionError(
+            "O router nao priorizou o periodo relativo mais recente para end_date. "
+            f"Esperado={expected_end_date.isoformat()}, recebido={normalized_params}"
+        )
+    print_check(
+        "router passou a priorizar o ultimo periodo relativo do follow-up: "
+        f"{expected_start_date.isoformat()} -> {expected_end_date.isoformat()}"
+    )
+
+
+def run_guided_clarification_follow_up_source_change(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Como o Search performou ontem?",
+    }
+    print_step("Primeira chamada dispara clarificacao guiada para Search")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "receita de Facebook",
+    }
+    print_step("Segunda chamada troca explicitamente o canal no follow-up")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post(
+        "/query",
+        json=second_payload,
+        headers={"X-Debug": "true"},
+    )
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+    router_decision = _get_debug_payload(second_body)
+    normalized_params = router_decision["normalized_params"]
+
+    if second_body.answer != MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "Trocar o canal no follow-up deveria iniciar uma nova pergunta e voltar "
+            f"a pedir datas. Recebido={second_body.answer!r}"
+        )
+    print_check("follow-up com novo canal virou nova pergunta e pediu datas")
+    if second_body.tools_used:
+        raise AssertionError(
+            "Nenhuma tool deveria rodar quando o novo follow-up ainda falta datas. "
+            f"Recebido={second_body.tools_used}"
+        )
+    print_check("nenhuma tool rodou no follow-up com canal trocado")
+    if normalized_params.get("traffic_source") != "Facebook":
+        raise AssertionError(
+            "O novo follow-up deveria focar em Facebook, sem reaproveitar Search. "
+            f"Recebido={normalized_params}"
+        )
+    if second_body.metadata is None or second_body.metadata.debug is None:
+        raise AssertionError("Metadata de debug ausente no follow-up com novo canal.")
+    if second_body.metadata.debug.resolved_question != "receita de Facebook":
+        raise AssertionError(
+            "O follow-up com troca de canal nao deveria ser mergeado com o turno "
+            "anterior. "
+            f"Recebido={second_body.metadata.debug.resolved_question!r}"
+        )
+    print_check("resolved_question confirmou que o follow-up virou pergunta nova")
 
 
 def run_no_stale_final_answer_after_short_circuit(
