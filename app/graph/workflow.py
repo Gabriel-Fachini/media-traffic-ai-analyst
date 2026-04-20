@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
-import re
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
@@ -32,6 +31,8 @@ from app.graph.router import (
     OUT_OF_SCOPE_MESSAGE,
     UNSUPPORTED_DIMENSION_MESSAGE,
     build_router_decision,
+    question_is_metric_clarification_follow_up,
+    question_contains_temporal_signal,
 )
 from app.schemas.router import RouterDecision
 from app.graph.tools import get_analytics_tools
@@ -42,7 +43,6 @@ TEMPORARY_LLM_FAILURE_MESSAGE = (
 TEMPORARY_TOOL_FAILURE_MESSAGE = (
     "Nao consegui consultar os dados agora por uma falha temporaria. Tente novamente em instantes."
 )
-DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 class AnalyticsGraphState(TypedDict, total=False):
@@ -251,10 +251,6 @@ def _build_router_tool_args(router_decision: RouterDecision) -> dict[str, Any]:
     }
 
 
-def _question_contains_iso_dates(question: str) -> bool:
-    return bool(DATE_TOKEN_PATTERN.search(question))
-
-
 def _resolve_router_turn(
     state: AnalyticsGraphState,
     question: str,
@@ -262,11 +258,23 @@ def _resolve_router_turn(
     router_decision = build_router_decision(question)
     previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
 
+    should_merge_temporal_follow_up = (
+        previous_router_decision is not None
+        and previous_router_decision.needs_clarification
+        and previous_router_decision.clarification_reason in {"missing_dates", "invalid_dates"}
+        and question_contains_temporal_signal(question)
+        and router_decision.intent == "out_of_scope"
+    )
+    should_merge_metric_follow_up = (
+        previous_router_decision is not None
+        and previous_router_decision.needs_clarification
+        and previous_router_decision.clarification_reason == "ambiguous_metric"
+        and question_is_metric_clarification_follow_up(question)
+    )
+
     if (
-        previous_router_decision is None
-        or not previous_router_decision.needs_clarification
-        or not _question_contains_iso_dates(question)
-        or router_decision.intent != "out_of_scope"
+        not should_merge_temporal_follow_up
+        and not should_merge_metric_follow_up
     ):
         return question, router_decision
 
@@ -276,7 +284,10 @@ def _resolve_router_turn(
 
     merged_question = f"{previous_question.rstrip()} {question.strip()}".strip()
     merged_router_decision = build_router_decision(merged_question)
-    if merged_router_decision.intent == "out_of_scope":
+    if (
+        merged_router_decision.intent == "out_of_scope"
+        and not merged_router_decision.needs_clarification
+    ):
         return question, router_decision
 
     return merged_question, merged_router_decision

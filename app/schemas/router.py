@@ -5,8 +5,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-RouterIntent = Literal["traffic_volume", "channel_performance", "out_of_scope"]
-RouterClarificationReason = Literal["missing_dates", "invalid_dates"]
+RouterIntent = Literal[
+    "traffic_volume",
+    "channel_performance",
+    "ambiguous_analytics",
+    "out_of_scope",
+]
+RouterClarificationReason = Literal[
+    "missing_dates",
+    "invalid_dates",
+    "ambiguous_metric",
+]
 RouterRefusalReason = Literal[
     "empty_question",
     "out_of_scope",

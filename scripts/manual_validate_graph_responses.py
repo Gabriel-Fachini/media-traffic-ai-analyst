@@ -63,6 +63,34 @@ def build_scenarios() -> list[ValidationScenario]:
             expects_tool_execution=True,
         ),
         ValidationScenario(
+            name="traffic-volume-brazilian-dates",
+            description="Valida consulta com datas em formato brasileiro.",
+            question=(
+                "Qual foi o volume de usuarios de Search entre 01/01/2024 e "
+                "31/01/2024?"
+            ),
+            expects_tool_execution=True,
+        ),
+        ValidationScenario(
+            name="channel-performance-relative-period",
+            description="Valida consulta com periodo relativo suportado.",
+            question="Qual foi a receita de Search no ultimo mes?",
+            expects_tool_execution=True,
+        ),
+        ValidationScenario(
+            name="channel-performance-sales-alias",
+            description="Valida consulta com alias de receita no router.",
+            question="Quanto vendeu Search ontem?",
+            expects_tool_execution=True,
+        ),
+        ValidationScenario(
+            name="guided-clarification-ambiguous-request",
+            description="Valida clarificacao guiada para pergunta valida, mas ambigua.",
+            question="Como o Search performou ontem?",
+            expects_tool_execution=False,
+            forbidden_final_answers=(MISSING_DATES_MESSAGE,),
+        ),
+        ValidationScenario(
             name="missing-dates",
             description="Valida pedido de clarificacao quando faltam datas.",
             question="Qual foi a receita de Search?",

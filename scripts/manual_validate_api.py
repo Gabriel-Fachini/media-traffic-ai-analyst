@@ -66,6 +66,30 @@ def build_scenarios(*, show_body: bool) -> list[ValidationScenario]:
             ),
         ),
         ValidationScenario(
+            name="query-brazilian-date-format",
+            description="Valida /query com datas em formato DD/MM/AAAA.",
+            runner=lambda client: run_query_brazilian_date_format(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="query-relative-period",
+            description="Valida /query com periodo relativo suportado.",
+            runner=lambda client: run_query_relative_period(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="query-sales-alias",
+            description="Valida /query com alias semantico de receita.",
+            runner=lambda client: run_query_sales_alias(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
             name="missing-dates",
             description="Valida clarificacao quando faltam datas na pergunta.",
             runner=lambda client: run_missing_dates(client, show_body=show_body),
@@ -82,6 +106,39 @@ def build_scenarios(*, show_body: bool) -> list[ValidationScenario]:
                 "do thread_id."
             ),
             runner=lambda client: run_clarification_follow_up_dates_only(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="clarification-follow-up-relative-date-only",
+            description=(
+                "Valida que um follow-up so com periodo relativo reutiliza o "
+                "contexto original do thread_id."
+            ),
+            runner=lambda client: run_clarification_follow_up_relative_date_only(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="guided-clarification-ambiguous-request",
+            description=(
+                "Valida que uma pergunta provavelmente valida, mas ambigua, vira "
+                "clarificacao guiada em vez de out_of_scope."
+            ),
+            runner=lambda client: run_guided_clarification_ambiguous_request(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="guided-clarification-follow-up-metric-only",
+            description=(
+                "Valida que uma resposta curta como 'receita' reaproveita a "
+                "clarificacao guiada anterior no mesmo thread_id."
+            ),
+            runner=lambda client: run_guided_clarification_follow_up_metric_only(
                 client,
                 show_body=show_body,
             ),
@@ -261,6 +318,85 @@ def run_query_channel_performance(client: TestClient, *, show_body: bool) -> Non
     )
 
 
+def run_query_brazilian_date_format(client: TestClient, *, show_body: bool) -> None:
+    del show_body
+    payload = {
+        "question": (
+            "Quais canais tiveram melhor desempenho de receita entre "
+            "01/01/2024 e 31/01/2024?"
+        )
+    }
+    print_step("Chamando /query com datas em formato brasileiro")
+    print_request("POST", "/query", payload)
+    response = client.post("/query", json=payload)
+    print_http_response(response)
+    assert_status_code(response, 200)
+    print_check("status code 200 confirmado")
+    body = parse_query_response(response)
+
+    if "channel_performance_analyzer" not in body.tools_used:
+        raise AssertionError(
+            "Esperava channel_performance_analyzer em tools_used, "
+            f"recebi {body.tools_used}"
+        )
+    print_check("datas em DD/MM/AAAA acionaram channel_performance_analyzer")
+    if body.answer == MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A pergunta com datas brasileiras nao deveria cair em clarificacao."
+        )
+    print_check("datas brasileiras nao caíram em clarificacao")
+
+
+def run_query_relative_period(client: TestClient, *, show_body: bool) -> None:
+    del show_body
+    payload = {
+        "question": "Qual foi a receita de Search no ultimo mes?"
+    }
+    print_step("Chamando /query com periodo relativo suportado")
+    print_request("POST", "/query", payload)
+    response = client.post("/query", json=payload)
+    print_http_response(response)
+    assert_status_code(response, 200)
+    print_check("status code 200 confirmado")
+    body = parse_query_response(response)
+
+    if "channel_performance_analyzer" not in body.tools_used:
+        raise AssertionError(
+            "Esperava channel_performance_analyzer em tools_used, "
+            f"recebi {body.tools_used}"
+        )
+    print_check("periodo relativo acionou channel_performance_analyzer")
+    if body.answer == MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A pergunta com periodo relativo nao deveria cair em clarificacao."
+        )
+    print_check("periodo relativo nao caiu em clarificacao")
+
+
+def run_query_sales_alias(client: TestClient, *, show_body: bool) -> None:
+    del show_body
+    payload = {
+        "question": "Quanto vendeu Search ontem?"
+    }
+    print_step("Chamando /query com alias semantico de receita")
+    print_request("POST", "/query", payload)
+    response = client.post("/query", json=payload)
+    print_http_response(response)
+    assert_status_code(response, 200)
+    print_check("status code 200 confirmado")
+    body = parse_query_response(response)
+
+    if "channel_performance_analyzer" not in body.tools_used:
+        raise AssertionError(
+            "Esperava channel_performance_analyzer em tools_used, "
+            f"recebi {body.tools_used}"
+        )
+    print_check("alias de receita acionou channel_performance_analyzer")
+    if "out_of_scope" in body.answer.lower():
+        raise AssertionError("A pergunta com alias nao deveria cair em out_of_scope.")
+    print_check("alias semantico nao caiu em out_of_scope")
+
+
 def run_missing_dates(client: TestClient, *, show_body: bool) -> None:
     del show_body
     payload = {"question": "Qual foi a receita de Search?"}
@@ -415,6 +551,194 @@ def run_clarification_follow_up_dates_only(
     if not second_body.answer.strip():
         raise AssertionError("A resposta final do follow-up veio vazia.")
     print_check("follow-up retornou resposta final nao vazia")
+
+
+def run_clarification_follow_up_relative_date_only(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Qual foi a receita de Search?",
+    }
+    print_step("Primeira chamada sem datas para abrir clarificacao")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if first_body.answer != MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A primeira chamada deveria retornar a mensagem de clarificacao de datas. "
+            f"Recebido={first_body.answer!r}"
+        )
+    print_check("primeira chamada retornou a clarificacao esperada")
+    if first_body.metadata is None:
+        raise AssertionError("Metadata ausente na primeira chamada de clarificacao.")
+    if first_body.metadata.thread_id != thread_id:
+        raise AssertionError("A primeira chamada nao preservou o thread_id informado.")
+    print_check("primeira chamada preservou o thread_id informado")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "Ontem.",
+    }
+    print_step("Segunda chamada enviando apenas um periodo relativo no mesmo thread_id")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post("/query", json=second_payload)
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+
+    if second_body.metadata is None:
+        raise AssertionError("Metadata ausente na segunda chamada de follow-up.")
+    if second_body.metadata.thread_id != thread_id:
+        raise AssertionError("A segunda chamada nao preservou o thread_id informado.")
+    print_check("segunda chamada preservou o thread_id informado")
+    if (
+        second_body.metadata.context_message_count
+        <= first_body.metadata.context_message_count
+    ):
+        raise AssertionError(
+            "O contexto nao cresceu apos o follow-up so com periodo relativo. "
+            f"Primeira={first_body.metadata.context_message_count}, "
+            f"segunda={second_body.metadata.context_message_count}"
+        )
+    print_check(
+        "contexto cresceu entre clarificacao e follow-up relativo: "
+        f"{first_body.metadata.context_message_count} -> "
+        f"{second_body.metadata.context_message_count}"
+    )
+    if second_body.answer == MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "A segunda chamada repetiu a mensagem de clarificacao, indicando que o "
+            "contexto original nao foi reutilizado."
+        )
+    print_check("segunda chamada nao repetiu a mensagem antiga de clarificacao")
+    if "channel_performance_analyzer" not in second_body.tools_used:
+        raise AssertionError(
+            "O follow-up so com periodo relativo deveria reutilizar a pergunta "
+            "original e acionar channel_performance_analyzer. "
+            f"Recebido={second_body.tools_used}"
+        )
+    print_check("follow-up relativo acionou channel_performance_analyzer")
+    if not second_body.answer.strip():
+        raise AssertionError("A resposta final do follow-up veio vazia.")
+    print_check("follow-up relativo retornou resposta final nao vazia")
+
+
+def run_guided_clarification_ambiguous_request(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    payload = {"question": "Como o Search performou ontem?"}
+    print_step("Chamando /query com pergunta valida, mas ambigua")
+    print_request("POST", "/query", payload)
+    response = client.post("/query", json=payload)
+    print_http_response(response)
+    assert_status_code(response, 200)
+    print_check("status code 200 confirmado")
+    body = parse_query_response(response)
+
+    if body.tools_used:
+        raise AssertionError(
+            "Nenhuma tool deveria rodar antes da clarificacao guiada. "
+            f"Recebido={body.tools_used}"
+        )
+    print_check("tools_used veio vazio na clarificacao guiada")
+    normalized_answer = body.answer.lower()
+    if "volume de usuarios" not in normalized_answer:
+        raise AssertionError(
+            "A resposta deveria orientar a opcao de volume de usuarios. "
+            f"Recebido={body.answer!r}"
+        )
+    if "performance financeira" not in normalized_answer:
+        raise AssertionError(
+            "A resposta deveria orientar a opcao de performance financeira. "
+            f"Recebido={body.answer!r}"
+        )
+    if "out_of_scope" in normalized_answer:
+        raise AssertionError(
+            "A pergunta ambigua nao deveria cair em out_of_scope."
+        )
+    print_check("pergunta ambigua virou clarificacao guiada")
+
+
+def run_guided_clarification_follow_up_metric_only(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": "Como o Search performou ontem?",
+    }
+    print_step("Primeira chamada dispara clarificacao guiada")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if first_body.metadata is None:
+        raise AssertionError("Metadata ausente na primeira chamada guiada.")
+    if "volume de usuarios" not in first_body.answer.lower():
+        raise AssertionError(
+            "A primeira chamada deveria trazer a clarificacao guiada esperada."
+        )
+    print_check("primeira chamada retornou clarificacao guiada")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": "receita",
+    }
+    print_step("Segunda chamada responde apenas a metrica no mesmo thread_id")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post("/query", json=second_payload)
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+
+    if second_body.metadata is None:
+        raise AssertionError("Metadata ausente na segunda chamada guiada.")
+    if second_body.metadata.thread_id != thread_id:
+        raise AssertionError("A segunda chamada nao preservou o thread_id informado.")
+    print_check("segunda chamada preservou o thread_id informado")
+    if (
+        second_body.metadata.context_message_count
+        <= first_body.metadata.context_message_count
+    ):
+        raise AssertionError(
+            "O contexto nao cresceu apos o follow-up guiado. "
+            f"Primeira={first_body.metadata.context_message_count}, "
+            f"segunda={second_body.metadata.context_message_count}"
+        )
+    print_check(
+        "contexto cresceu entre clarificacao guiada e follow-up: "
+        f"{first_body.metadata.context_message_count} -> "
+        f"{second_body.metadata.context_message_count}"
+    )
+    if "channel_performance_analyzer" not in second_body.tools_used:
+        raise AssertionError(
+            "O follow-up com 'receita' deveria reaproveitar o contexto e acionar "
+            f"channel_performance_analyzer. Recebido={second_body.tools_used}"
+        )
+    print_check("follow-up guiado acionou channel_performance_analyzer")
+    if not second_body.answer.strip():
+        raise AssertionError("A resposta final do follow-up veio vazia.")
+    print_check("follow-up guiado retornou resposta final nao vazia")
 
 
 def run_no_stale_final_answer_after_short_circuit(

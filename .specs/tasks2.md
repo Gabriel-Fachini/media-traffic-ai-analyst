@@ -77,7 +77,7 @@ Organizar as proximas melhorias do MVP com foco direto nos criterios de avaliaca
 
 **Meta de percepcao:** fazer o sistema parecer um analista junior util, e nao apenas um executor tecnico de queries.
 
-- [ ] 4.1 Implementar interpretacao de periodos relativos frequentes, como `ultimo mes`, `ultimos 7 dias`, `ontem` e `este mes`, normalizando para datas ISO antes do tool calling.
+- [x] 4.1 Implementar interpretacao de periodos relativos frequentes, como `ultimo mes`, `ultimos 7 dias`, `ontem` e `este mes`, normalizando para datas ISO antes do tool calling.
 - [ ] 4.2 Melhorar a camada de sintese para reduzir respostas genericas e aumentar respostas ancoradas em fatos do proprio resultado.
 - [ ] 4.3 Antes da sintese final, calcular fatos estruturados uteis, como lider do periodo, segundo colocado, diferenca absoluta e participacao relativa quando fizer sentido.
 - [ ] 4.4 Reforcar recusas elegantes para:
@@ -85,6 +85,8 @@ Organizar as proximas melhorias do MVP com foco direto nos criterios de avaliaca
   - pedidos de PII ou colunas fora do contrato de produto
   - perguntas fora do dominio de midia/growth
 - [ ] 4.5 Melhorar mensagens de clarificacao para que sejam curtas, objetivas e parecam parte natural da experiencia conversacional.
+- [x] 4.6 Refinar o entendimento semantico do router para reduzir falsos `out_of_scope`, aceitar aliases naturais de negocio e responder com clarificacoes guiadas quando a pergunta parecer valida, mas ambigua.
+- [ ] 4.7 Transformar o router em `llm-first`, usando classificacao semantica com saida estruturada para decidir intencao, clarificacao e recusa, enquanto as regras deterministicas ficam restritas a normalizacao temporal, validacao de schema e guardrails de seguranca.
 
 ### **Definicao de pronto para este criterio**
 

@@ -12,11 +12,12 @@ class QueryRequest(BaseModel):
         max_length=1000,
         description=(
             "Pergunta em linguagem natural sobre trafego, pedidos ou receita por "
-            "canal. Quando depender de dados, informe start_date e end_date em "
-            "YYYY-MM-DD na propria pergunta."
+            "canal. Quando depender de dados, informe o periodo na propria "
+            "pergunta usando YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA ou formatos "
+            "relativos como ontem, este mes, ultimo mes e ultimos 7 dias."
         ),
         examples=[
-            "Quais canais tiveram melhor desempenho de receita entre 2024-01-01 e 2024-01-31?"
+            "Quanto vendeu Search ontem?"
         ],
     )
     thread_id: str | None = Field(
@@ -32,8 +33,7 @@ class QueryRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "question": (
-                    "Qual foi o volume de usuarios de Search entre 2024-01-01 e "
-                    "2024-01-31?"
+                    "Qual foi a receita de Search em 01/04/26?"
                 )
             }
         },

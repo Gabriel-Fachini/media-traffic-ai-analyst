@@ -1,18 +1,24 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 import re
 import unicodedata
 from typing import Literal
 
 from app.schemas.router import RouterDecision, RouterNormalizedParams
 
-DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+EXPLICIT_DATE_TOKEN_PATTERN = re.compile(
+    r"\b(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{2}(?:\d{2})?)\b"
+)
 DIMENSION_REQUEST_PATTERN = re.compile(
     r"\b(?:por|by|per)\s+([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\b"
 )
 SOURCE_FILTER_PATTERN = re.compile(r"\b(?:de|do|da|from)\s+([a-z0-9_]+)\b")
 QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
+YESTERDAY_PATTERN = re.compile(r"\bontem\b")
+THIS_MONTH_PATTERN = re.compile(r"\beste\s+mes\b")
+LAST_MONTH_PATTERN = re.compile(r"\bultimo\s+mes\b")
+LAST_N_DAYS_PATTERN = re.compile(r"\bultimos?\s+(\d+)\s+dias?\b")
 SUPPORTED_CHANNEL_TOKENS = frozenset(
     {
         "canal",
@@ -49,6 +55,28 @@ SUPPORTED_PERFORMANCE_METRIC_TOKENS = frozenset(
         "desempenho",
         "melhor",
         "top",
+        "venda",
+        "vendas",
+        "vendeu",
+        "faturou",
+        "faturamento",
+        "faturar",
+        "financeiro",
+        "financeira",
+    }
+)
+AMBIGUOUS_ANALYTICS_HINT_TOKENS = frozenset(
+    {
+        "performou",
+        "performar",
+        "mostre",
+        "mostrar",
+        "mostra",
+        "melhores",
+        "resultado",
+        "resultados",
+        "pior",
+        "piores",
     }
 )
 SUPPORTED_SOURCE_TOKENS = frozenset(
@@ -157,12 +185,14 @@ SOURCE_FILTER_IGNORED_TOKENS = frozenset(
 )
 
 MISSING_DATES_MESSAGE = (
-    "Preciso que voce informe start_date e end_date no formato YYYY-MM-DD para eu "
-    "consultar os dados. Exemplo: 2024-01-01 ate 2024-01-31."
+    "Preciso que voce informe o periodo para eu consultar os dados. Voce pode usar "
+    "YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA ou periodos relativos como ontem, este "
+    "mes, ultimo mes e ultimos 7 dias."
 )
 INVALID_DATES_MESSAGE = (
-    "As datas informadas sao invalidas. Use start_date e end_date reais no formato "
-    "YYYY-MM-DD, por exemplo 2024-01-01 ate 2024-01-31."
+    "As datas informadas sao invalidas. Use datas reais em YYYY-MM-DD, DD/MM/AAAA, "
+    "DD/MM/AA ou periodos relativos suportados, por exemplo 2024-01-01 ate "
+    "2024-01-31, 01/04/2026 ate 20/04/2026, 01/04/26 ou ultimos 7 dias."
 )
 UNSUPPORTED_METRIC_MESSAGE = (
     "No MVP atual eu so consigo analisar volume de trafego, pedidos e receita por "
@@ -172,7 +202,8 @@ UNSUPPORTED_METRIC_MESSAGE = (
 UNSUPPORTED_DIMENSION_MESSAGE = (
     "No MVP atual eu so consigo analisar trafego, pedidos e receita por canal "
     "(traffic_source). Reformule a pergunta nesse escopo e, quando a consulta "
-    "depender de dados, informe start_date e end_date em YYYY-MM-DD."
+    "depender de dados, informe o periodo em YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA "
+    "ou com periodos relativos suportados."
 )
 EMPTY_QUESTION_MESSAGE = (
     "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."
@@ -180,7 +211,8 @@ EMPTY_QUESTION_MESSAGE = (
 OUT_OF_SCOPE_MESSAGE = (
     "Consigo ajudar apenas com analises de trafego, pedidos e receita por canal "
     "no dataset atual. Reformule a pergunta nesse escopo e, quando a consulta "
-    "depender de dados, informe start_date e end_date em YYYY-MM-DD."
+    "depender de dados, informe o periodo em YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA "
+    "ou com periodos relativos suportados."
 )
 
 
@@ -200,8 +232,15 @@ def _normalize_text(value: str) -> str:
     ).lower()
 
 
-def _extract_iso_dates(question: str) -> list[str]:
-    return DATE_TOKEN_PATTERN.findall(question)
+def _resolve_reference_date(reference_date: date | None) -> date:
+    return reference_date or date.today()
+
+
+def _extract_explicit_date_tokens(question: str) -> list[str]:
+    return [
+        match.group(0)
+        for match in EXPLICIT_DATE_TOKEN_PATTERN.finditer(question)
+    ]
 
 
 def _extract_requested_dimensions(question: str) -> list[str]:
@@ -212,23 +251,111 @@ def _extract_requested_dimensions(question: str) -> list[str]:
     ]
 
 
-def _extract_valid_and_invalid_iso_dates(
+def _parse_explicit_date_token(date_token: str) -> date:
+    if "-" in date_token:
+        return date.fromisoformat(date_token)
+    for date_format in ("%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(date_token, date_format).date()
+        except ValueError:
+            continue
+    raise ValueError("Data invalida.")
+
+
+def _extract_valid_and_invalid_explicit_dates(
     question: str,
 ) -> tuple[list[date], list[str]]:
     valid_dates: list[date] = []
     invalid_dates: list[str] = []
 
-    for date_token in _extract_iso_dates(question):
+    for date_token in _extract_explicit_date_tokens(question):
         try:
-            valid_dates.append(date.fromisoformat(date_token))
+            valid_dates.append(_parse_explicit_date_token(date_token))
         except ValueError:
             invalid_dates.append(date_token)
 
     return valid_dates, invalid_dates
 
 
+def _match_yesterday(reference_date: date) -> tuple[date, date]:
+    yesterday = reference_date - timedelta(days=1)
+    return yesterday, yesterday
+
+
+def _match_this_month(reference_date: date) -> tuple[date, date]:
+    return reference_date.replace(day=1), reference_date
+
+
+def _match_last_month(reference_date: date) -> tuple[date, date]:
+    current_month_start = reference_date.replace(day=1)
+    last_month_end = current_month_start - timedelta(days=1)
+    return last_month_end.replace(day=1), last_month_end
+
+
+def _extract_relative_date_range(
+    question: str,
+    *,
+    reference_date: date | None = None,
+) -> tuple[tuple[date, date] | None, list[str]]:
+    normalized_question = _normalize_text(question)
+    resolved_reference_date = _resolve_reference_date(reference_date)
+    relative_matches: list[tuple[int, tuple[date, date]]] = []
+    invalid_tokens: list[str] = []
+
+    for match in YESTERDAY_PATTERN.finditer(normalized_question):
+        relative_matches.append(
+            (match.start(), _match_yesterday(resolved_reference_date))
+        )
+
+    for match in THIS_MONTH_PATTERN.finditer(normalized_question):
+        relative_matches.append(
+            (match.start(), _match_this_month(resolved_reference_date))
+        )
+
+    for match in LAST_MONTH_PATTERN.finditer(normalized_question):
+        relative_matches.append(
+            (match.start(), _match_last_month(resolved_reference_date))
+        )
+
+    for match in LAST_N_DAYS_PATTERN.finditer(normalized_question):
+        day_count = int(match.group(1))
+        if day_count <= 0:
+            invalid_tokens.append(match.group(0))
+            continue
+        relative_matches.append(
+            (
+                match.start(),
+                (
+                    resolved_reference_date - timedelta(days=day_count - 1),
+                    resolved_reference_date,
+                ),
+            )
+        )
+
+    if not relative_matches:
+        return None, invalid_tokens
+
+    relative_matches.sort(key=lambda item: item[0])
+    return relative_matches[0][1], invalid_tokens
+
+
 def _extract_question_tokens(question: str) -> set[str]:
     return set(QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)))
+
+
+def _question_has_supported_context(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    return bool(
+        question_tokens
+        & (
+            SUPPORTED_CHANNEL_TOKENS
+            | SUPPORTED_SOURCE_TOKENS
+            | SUPPORTED_VOLUME_SIGNAL_TOKENS
+            | SUPPORTED_USER_METRIC_TOKENS
+            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
+            | AMBIGUOUS_ANALYTICS_HINT_TOKENS
+        )
+    )
 
 
 def _extract_source_filter_tokens(question: str) -> list[str]:
@@ -304,6 +431,25 @@ def _question_supports_date_clarification(question: str) -> bool:
     return (has_user_metric or has_volume_signal) and has_channel_context
 
 
+def _question_contains_metric_follow_up_signal(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    return bool(
+        question_tokens
+        & (
+            SUPPORTED_USER_METRIC_TOKENS
+            | SUPPORTED_VOLUME_SIGNAL_TOKENS
+            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
+        )
+    )
+
+
+def question_is_metric_clarification_follow_up(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens or len(question_tokens) > 4:
+        return False
+    return _question_contains_metric_follow_up_signal(question)
+
+
 def _question_is_supported_channel_comparison(question: str) -> bool:
     question_tokens = _extract_question_tokens(question)
     if not question_tokens:
@@ -315,7 +461,7 @@ def _question_is_supported_channel_comparison(question: str) -> bool:
 
 
 def _resolve_router_intent(question: str) -> Literal[
-    "traffic_volume", "channel_performance", "out_of_scope"
+    "traffic_volume", "channel_performance", "ambiguous_analytics", "out_of_scope"
 ]:
     question_tokens = _extract_question_tokens(question)
     if not question_tokens:
@@ -336,13 +482,40 @@ def _resolve_router_intent(question: str) -> Literal[
     if _question_supports_date_clarification(question):
         return "traffic_volume"
 
+    has_temporal_signal = question_contains_temporal_signal(question)
+    has_supported_context = _question_has_supported_context(question)
+    has_ambiguous_hint = bool(question_tokens & AMBIGUOUS_ANALYTICS_HINT_TOKENS)
+    has_source_or_channel_context = bool(
+        question_tokens & (SUPPORTED_CHANNEL_TOKENS | SUPPORTED_SOURCE_TOKENS)
+    )
+    if has_supported_context and (
+        has_ambiguous_hint or (has_source_or_channel_context and has_temporal_signal)
+    ):
+        return "ambiguous_analytics"
+
     return "out_of_scope"
 
 
-def _build_normalized_params(question: str) -> RouterNormalizedParams:
-    valid_dates, _ = _extract_valid_and_invalid_iso_dates(question)
-    start_date = valid_dates[0] if len(valid_dates) >= 1 else None
-    end_date = valid_dates[1] if len(valid_dates) >= 2 else None
+def _build_normalized_params(
+    question: str,
+    *,
+    reference_date: date | None = None,
+) -> RouterNormalizedParams:
+    valid_dates, _ = _extract_valid_and_invalid_explicit_dates(question)
+    relative_date_range, _ = _extract_relative_date_range(
+        question,
+        reference_date=reference_date,
+    )
+    start_date = None
+    end_date = None
+    if len(valid_dates) >= 2:
+        start_date = valid_dates[0]
+        end_date = valid_dates[1]
+    elif len(valid_dates) == 1:
+        start_date = valid_dates[0]
+        end_date = valid_dates[0]
+    elif relative_date_range is not None:
+        start_date, end_date = relative_date_range
     if (
         start_date is not None
         and end_date is not None
@@ -358,7 +531,64 @@ def _build_normalized_params(question: str) -> RouterNormalizedParams:
     )
 
 
-def build_router_decision(question: str) -> RouterDecision:
+def question_contains_temporal_signal(question: str) -> bool:
+    if EXPLICIT_DATE_TOKEN_PATTERN.search(question):
+        return True
+
+    normalized_question = _normalize_text(question)
+    return any(
+        pattern.search(normalized_question)
+        for pattern in (
+            YESTERDAY_PATTERN,
+            THIS_MONTH_PATTERN,
+            LAST_MONTH_PATTERN,
+            LAST_N_DAYS_PATTERN,
+        )
+    )
+
+
+def _format_guided_subject(normalized_params: RouterNormalizedParams) -> str:
+    if normalized_params.traffic_source is not None:
+        return f"o canal {normalized_params.traffic_source}"
+    return "os canais"
+
+
+def _format_guided_period(normalized_params: RouterNormalizedParams) -> str | None:
+    start_date = normalized_params.start_date
+    end_date = normalized_params.end_date
+    if start_date is None or end_date is None:
+        return None
+    if start_date == end_date:
+        return f"em {start_date.isoformat()}"
+    return f"no periodo de {start_date.isoformat()} ate {end_date.isoformat()}"
+
+
+def _build_guided_metric_clarification_message(
+    normalized_params: RouterNormalizedParams,
+) -> str:
+    subject = _format_guided_subject(normalized_params)
+    period = _format_guided_period(normalized_params)
+
+    if period is not None:
+        return (
+            f"Entendi que voce quer analisar {subject} {period}, mas preciso alinhar "
+            "o foco. Voce quer ver volume de usuarios ou performance financeira "
+            "(receita e pedidos)?"
+        )
+
+    return (
+        f"Entendi que voce quer analisar {subject}, mas preciso alinhar o foco. "
+        "Voce quer ver volume de usuarios ou performance financeira (receita e "
+        "pedidos)? Se quiser, ja pode responder junto com o periodo em "
+        "YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA ou com formatos relativos como ontem."
+    )
+
+
+def build_router_decision(
+    question: str,
+    *,
+    reference_date: date | None = None,
+) -> RouterDecision:
     if not question:
         return RouterDecision(
             intent="out_of_scope",
@@ -367,7 +597,11 @@ def build_router_decision(question: str) -> RouterDecision:
             response_message=EMPTY_QUESTION_MESSAGE,
         )
 
-    normalized_params = _build_normalized_params(question)
+    resolved_reference_date = _resolve_reference_date(reference_date)
+    normalized_params = _build_normalized_params(
+        question,
+        reference_date=resolved_reference_date,
+    )
     intent = _resolve_router_intent(question)
 
     if _question_requests_unsupported_dimension(question):
@@ -398,6 +632,17 @@ def build_router_decision(question: str) -> RouterDecision:
             ),
         )
 
+    if intent == "ambiguous_analytics":
+        return RouterDecision(
+            intent="ambiguous_analytics",
+            normalized_params=normalized_params,
+            needs_clarification=True,
+            clarification_reason="ambiguous_metric",
+            response_message=_build_guided_metric_clarification_message(
+                normalized_params
+            ),
+        )
+
     if intent == "out_of_scope":
         return RouterDecision(
             intent="out_of_scope",
@@ -406,8 +651,13 @@ def build_router_decision(question: str) -> RouterDecision:
             response_message=OUT_OF_SCOPE_MESSAGE,
         )
 
-    valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
-    if invalid_dates:
+    valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
+    _, invalid_relative_tokens = _extract_relative_date_range(
+        question,
+        reference_date=resolved_reference_date,
+    )
+    all_invalid_dates = [*invalid_dates, *invalid_relative_tokens]
+    if all_invalid_dates:
         return RouterDecision(
             intent=intent,
             normalized_params=normalized_params,
@@ -416,7 +666,11 @@ def build_router_decision(question: str) -> RouterDecision:
             response_message=INVALID_DATES_MESSAGE,
         )
 
-    if len(valid_dates) < 2:
+    has_complete_date_range = (
+        normalized_params.start_date is not None
+        and normalized_params.end_date is not None
+    )
+    if not has_complete_date_range:
         return RouterDecision(
             intent=intent,
             normalized_params=normalized_params,
@@ -425,7 +679,7 @@ def build_router_decision(question: str) -> RouterDecision:
             response_message=MISSING_DATES_MESSAGE,
         )
 
-    if valid_dates[0] > valid_dates[1]:
+    if len(valid_dates) >= 2 and valid_dates[0] > valid_dates[1]:
         return RouterDecision(
             intent=intent,
             normalized_params=RouterNormalizedParams(
@@ -450,4 +704,6 @@ __all__ = [
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "UNSUPPORTED_METRIC_MESSAGE",
     "build_router_decision",
+    "question_is_metric_clarification_follow_up",
+    "question_contains_temporal_signal",
 ]
