@@ -30,6 +30,7 @@ from app.graph.prompts import (
     FINAL_RESPONSE_SYSTEM_PROMPT,
     build_conversation_system_prompt,
 )
+from app.schemas.router import RouterDecision, RouterNormalizedParams
 from app.graph.tools import get_analytics_tools
 from app.utils.config import Settings, get_settings
 
@@ -153,6 +154,11 @@ UNSUPPORTED_DIMENSION_MESSAGE = (
 EMPTY_QUESTION_MESSAGE = (
     "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."
 )
+OUT_OF_SCOPE_MESSAGE = (
+    "Consigo ajudar apenas com analises de trafego, pedidos e receita por canal "
+    "no dataset atual. Reformule a pergunta nesse escopo e, quando a consulta "
+    "depender de dados, informe start_date e end_date em YYYY-MM-DD."
+)
 TEMPORARY_LLM_FAILURE_MESSAGE = (
     "Nao consegui concluir a analise agora por uma falha temporaria. Tente novamente em instantes."
 )
@@ -164,6 +170,7 @@ TEMPORARY_TOOL_FAILURE_MESSAGE = (
 class AnalyticsGraphState(TypedDict, total=False):
     question: str
     messages: Annotated[list[AnyMessage], add_messages]
+    router_decision: RouterDecision
     next_step: Literal["conversation", "tools", "final_response"]
     turn_start_index: int
     final_answer: str
@@ -245,6 +252,27 @@ def _extract_question_tokens(question: str) -> set[str]:
     return set(QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)))
 
 
+def _extract_normalized_traffic_source(question: str) -> str | None:
+    source_aliases = {
+        "search": "Search",
+        "organic": "Organic",
+        "facebook": "Facebook",
+        "instagram": "Instagram",
+    }
+    found_sources: list[str] = []
+
+    for token in QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)):
+        normalized_source = source_aliases.get(token)
+        if normalized_source is None or normalized_source in found_sources:
+            continue
+        found_sources.append(normalized_source)
+
+    if len(found_sources) == 1:
+        return found_sources[0]
+
+    return None
+
+
 def _question_requests_unsupported_dimension(question: str) -> bool:
     requested_dimensions = _extract_requested_dimensions(question)
     if not requested_dimensions:
@@ -281,6 +309,114 @@ def _question_supports_date_clarification(question: str) -> bool:
     )
 
     return has_performance_metric or (has_user_metric and has_channel_context)
+
+
+def _resolve_router_intent(question: str) -> Literal[
+    "traffic_volume", "channel_performance", "out_of_scope"
+]:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return "out_of_scope"
+
+    if _question_requests_unsupported_dimension(question):
+        return "out_of_scope"
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return "out_of_scope"
+
+    if question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS:
+        return "channel_performance"
+
+    if _question_supports_date_clarification(question):
+        return "traffic_volume"
+
+    return "out_of_scope"
+
+
+def _build_normalized_params(question: str) -> RouterNormalizedParams:
+    valid_dates, _ = _extract_valid_and_invalid_iso_dates(question)
+    return RouterNormalizedParams(
+        traffic_source=_extract_normalized_traffic_source(question),
+        start_date=valid_dates[0] if len(valid_dates) >= 1 else None,
+        end_date=valid_dates[1] if len(valid_dates) >= 2 else None,
+    )
+
+
+def _build_router_decision(question: str) -> RouterDecision:
+    if not question:
+        return RouterDecision(
+            intent="out_of_scope",
+            normalized_params=RouterNormalizedParams(),
+            refusal_reason="empty_question",
+            response_message=EMPTY_QUESTION_MESSAGE,
+        )
+
+    normalized_params = _build_normalized_params(question)
+    intent = _resolve_router_intent(question)
+
+    if _question_requests_unsupported_dimension(question):
+        return RouterDecision(
+            intent="out_of_scope",
+            normalized_params=normalized_params,
+            refusal_reason="unsupported_dimension",
+            response_message=UNSUPPORTED_DIMENSION_MESSAGE,
+        )
+
+    question_tokens = _extract_question_tokens(question)
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return RouterDecision(
+            intent="out_of_scope",
+            normalized_params=normalized_params,
+            refusal_reason="unsupported_metric",
+            response_message=UNSUPPORTED_DIMENSION_MESSAGE,
+        )
+
+    if intent == "out_of_scope":
+        return RouterDecision(
+            intent="out_of_scope",
+            normalized_params=normalized_params,
+            refusal_reason="out_of_scope",
+            response_message=OUT_OF_SCOPE_MESSAGE,
+        )
+
+    valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
+    if invalid_dates:
+        return RouterDecision(
+            intent=intent,
+            normalized_params=normalized_params,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
+    if len(valid_dates) < 2:
+        return RouterDecision(
+            intent=intent,
+            normalized_params=normalized_params,
+            needs_clarification=True,
+            clarification_reason="missing_dates",
+            response_message=MISSING_DATES_MESSAGE,
+        )
+
+    if (
+        normalized_params.start_date is not None
+        and normalized_params.end_date is not None
+        and normalized_params.start_date > normalized_params.end_date
+    ):
+        return RouterDecision(
+            intent=intent,
+            normalized_params=RouterNormalizedParams(
+                traffic_source=normalized_params.traffic_source
+            ),
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
+    return RouterDecision(
+        intent=intent,
+        normalized_params=normalized_params,
+    )
 
 
 def _get_last_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
@@ -381,42 +517,20 @@ def build_analytics_graph(
     def router_node(state: AnalyticsGraphState) -> dict[str, Any]:
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
-        if not question:
-            return {
-                "final_answer": EMPTY_QUESTION_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
         injected_messages = _build_turn_question_messages(state)
+        router_decision = _build_router_decision(question)
 
-        if _question_requests_unsupported_dimension(question):
+        if router_decision.needs_clarification or router_decision.refusal_reason is not None:
             return {
                 "messages": injected_messages,
-                "final_answer": UNSUPPORTED_DIMENSION_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
-        should_request_dates = _question_supports_date_clarification(question)
-        valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
-        if should_request_dates and invalid_dates:
-            return {
-                "messages": injected_messages,
-                "final_answer": INVALID_DATES_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
-        if should_request_dates and len(valid_dates) < 2:
-            return {
-                "messages": injected_messages,
-                "final_answer": MISSING_DATES_MESSAGE,
+                "router_decision": router_decision,
+                "final_answer": router_decision.response_message or EMPTY_QUESTION_MESSAGE,
                 "next_step": "final_response",
                 "turn_start_index": turn_start_index,
             }
 
         return {
+            "router_decision": router_decision,
             "next_step": "conversation",
             "turn_start_index": turn_start_index,
         }
@@ -561,6 +675,16 @@ def build_analytics_graph(
     def route_after_router(
         state: AnalyticsGraphState,
     ) -> Literal["conversation", "final_response"]:
+        router_decision = state.get("router_decision")
+        if (
+            router_decision is not None
+            and (
+                router_decision.needs_clarification
+                or router_decision.refusal_reason is not None
+            )
+        ):
+            return "final_response"
+
         return cast(
             Literal["conversation", "final_response"],
             state.get("next_step", "final_response"),
@@ -644,6 +768,7 @@ __all__ = [
     "AnalyticsGraphState",
     "INVALID_DATES_MESSAGE",
     "MISSING_DATES_MESSAGE",
+    "OUT_OF_SCOPE_MESSAGE",
     "TEMPORARY_LLM_FAILURE_MESSAGE",
     "TEMPORARY_TOOL_FAILURE_MESSAGE",
     "UNSUPPORTED_DIMENSION_MESSAGE",
