@@ -161,6 +161,8 @@ Observacoes importantes:
 Antes de considerar uma alteracao tecnica concluida, rodar:
 
 - `poetry run verify`
+- `poetry run verify --agent`
+  - modo enxuto para iteracoes com agentes, mantendo apenas status por etapa e detalhes curtos em caso de falha
 
 O comando executa:
 
@@ -173,12 +175,16 @@ O comando executa:
 - `poetry run pytest`
   - suite deterministica padrao
   - nao depende de BigQuery nem de providers LLM externos
+- `poetry run pytest --agent`
+  - mesma suite padrao com output minimizado para reduzir consumo de tokens durante iteracoes
 - `poetry run pytest -m live`
   - smoke/integration tests opt-in
   - usa BigQuery e/ou providers LLM reais quando o ambiente estiver configurado
 - `poetry run pytest --run-live`
   - modo combinado
   - roda a suite padrao e inclui tambem os testes `live`
+- `poetry run pytest --run-live --agent`
+  - modo combinado com output enxuto
 
 ### 8.3 Cobertura esperada da suite
 
