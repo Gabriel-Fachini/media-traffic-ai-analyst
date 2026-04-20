@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
-import re
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
@@ -25,6 +24,8 @@ from app.graph.llm import (
     is_llm_timeout_error,
 )
 from app.graph.prompts import FINAL_RESPONSE_SYSTEM_PROMPT
+from app.graph.prompts import DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT
+from app.graph.prompts import STRATEGY_FOLLOW_UP_SYSTEM_PROMPT
 from app.graph.router import (
     EMPTY_QUESTION_MESSAGE,
     INVALID_DATES_MESSAGE,
@@ -32,6 +33,12 @@ from app.graph.router import (
     OUT_OF_SCOPE_MESSAGE,
     UNSUPPORTED_DIMENSION_MESSAGE,
     build_router_decision,
+    question_is_diagnostic_follow_up,
+    question_introduces_new_traffic_source,
+    question_is_metric_clarification_follow_up,
+    question_is_strategy_follow_up,
+    question_contains_temporal_signal,
+    strip_temporal_context,
 )
 from app.schemas.router import RouterDecision
 from app.graph.tools import get_analytics_tools
@@ -42,7 +49,6 @@ TEMPORARY_LLM_FAILURE_MESSAGE = (
 TEMPORARY_TOOL_FAILURE_MESSAGE = (
     "Nao consegui consultar os dados agora por uma falha temporaria. Tente novamente em instantes."
 )
-DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 class AnalyticsGraphState(TypedDict, total=False):
@@ -124,6 +130,10 @@ def _collect_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
     return [message for message in messages if isinstance(message, ToolMessage)]
 
 
+def _is_successful_tool_message(message: AnyMessage) -> bool:
+    return isinstance(message, ToolMessage) and message.status != "error"
+
+
 def _get_last_human_question(messages: list[AnyMessage]) -> str:
     for message in reversed(messages):
         if isinstance(message, HumanMessage):
@@ -195,6 +205,91 @@ def _collect_tools_used(messages: list[AnyMessage]) -> list[str]:
     return tools_used
 
 
+def _has_prior_successful_tool_context(state: AnalyticsGraphState) -> bool:
+    messages = list(state.get("messages", []))
+    turn_start_index = _resolve_turn_start_index(state)
+    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
+    return any(
+        _is_successful_tool_message(message)
+        for message in messages[:bounded_turn_start_index]
+    )
+
+
+def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
+    messages = list(state.get("messages", []))
+    turn_start_index = state.get("turn_start_index", _resolve_turn_start_index(state))
+    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
+    previous_messages = messages[:bounded_turn_start_index]
+
+    last_tool_index: int | None = None
+    for index in range(len(previous_messages) - 1, -1, -1):
+        if _is_successful_tool_message(previous_messages[index]):
+            last_tool_index = index
+            break
+
+    if last_tool_index is None:
+        return None
+
+    previous_turn_start_index = 0
+    for index in range(last_tool_index, -1, -1):
+        if isinstance(previous_messages[index], HumanMessage):
+            previous_turn_start_index = index
+            break
+
+    previous_turn_messages = previous_messages[previous_turn_start_index:]
+    previous_question = ""
+    if (
+        previous_turn_messages
+        and isinstance(previous_turn_messages[0], HumanMessage)
+    ):
+        previous_question = _content_to_text(previous_turn_messages[0].content).strip()
+
+    previous_answer = ""
+    for message in reversed(previous_turn_messages):
+        if not isinstance(message, AIMessage):
+            continue
+        previous_answer = _content_to_text(message.content).strip()
+        if previous_answer:
+            break
+
+    tool_context_blocks = [
+        f"Tool: {message.name}\nResultado:\n{_content_to_text(message.content)}"
+        for message in previous_turn_messages
+        if _is_successful_tool_message(message)
+    ]
+
+    if not previous_question and not previous_answer and not tool_context_blocks:
+        return None
+
+    context_blocks: list[str] = []
+    if previous_question:
+        context_blocks.append(f"Pergunta anterior:\n{previous_question}")
+    if previous_answer:
+        context_blocks.append(f"Resposta anterior:\n{previous_answer}")
+    if tool_context_blocks:
+        context_blocks.append(
+            "Resultados anteriores de tools:\n" + "\n\n".join(tool_context_blocks)
+        )
+    return "\n\n".join(context_blocks)
+
+
+def _resolve_follow_up_intent(
+    question: str,
+    *,
+    has_prior_context: bool,
+) -> Literal["strategy_follow_up", "diagnostic_follow_up"] | None:
+    if not has_prior_context:
+        return None
+
+    if question_is_strategy_follow_up(question):
+        return "strategy_follow_up"
+
+    if question_is_diagnostic_follow_up(question):
+        return "diagnostic_follow_up"
+
+    return None
+
+
 def _serialize_tool_result(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
@@ -251,22 +346,71 @@ def _build_router_tool_args(router_decision: RouterDecision) -> dict[str, Any]:
     }
 
 
-def _question_contains_iso_dates(question: str) -> bool:
-    return bool(DATE_TOKEN_PATTERN.search(question))
-
-
 def _resolve_router_turn(
     state: AnalyticsGraphState,
     question: str,
 ) -> tuple[str, RouterDecision]:
     router_decision = build_router_decision(question)
     previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
+    follow_up_changes_traffic_source = (
+        previous_router_decision is not None
+        and question_introduces_new_traffic_source(
+            question,
+            previous_traffic_source=(
+                previous_router_decision.normalized_params.traffic_source
+            ),
+        )
+    )
+    follow_up_intent = _resolve_follow_up_intent(
+        question,
+        has_prior_context=_has_prior_successful_tool_context(state),
+    )
+    if (
+        (
+            router_decision.refusal_reason in {"out_of_scope", "unsupported_dimension"}
+            or (
+                router_decision.needs_clarification
+                and router_decision.clarification_reason == "missing_dates"
+            )
+        )
+        and not follow_up_changes_traffic_source
+        and follow_up_intent is not None
+    ):
+        return (
+            question,
+            RouterDecision(
+                intent=follow_up_intent,
+                normalized_params=router_decision.normalized_params,
+            ),
+        )
+
+    should_merge_temporal_follow_up = (
+        previous_router_decision is not None
+        and previous_router_decision.needs_clarification
+        and previous_router_decision.clarification_reason in {"missing_dates", "invalid_dates"}
+        and question_contains_temporal_signal(question)
+        and not follow_up_changes_traffic_source
+        and (
+            (
+                previous_router_decision.clarification_reason == "invalid_dates"
+                and previous_router_decision.intent == "ambiguous_analytics"
+            )
+            or
+            router_decision.intent in {"out_of_scope", "ambiguous_analytics"}
+            or router_decision.intent == previous_router_decision.intent
+        )
+    )
+    should_merge_metric_follow_up = (
+        previous_router_decision is not None
+        and previous_router_decision.needs_clarification
+        and previous_router_decision.clarification_reason == "ambiguous_metric"
+        and question_is_metric_clarification_follow_up(question)
+        and not follow_up_changes_traffic_source
+    )
 
     if (
-        previous_router_decision is None
-        or not previous_router_decision.needs_clarification
-        or not _question_contains_iso_dates(question)
-        or router_decision.intent != "out_of_scope"
+        not should_merge_temporal_follow_up
+        and not should_merge_metric_follow_up
     ):
         return question, router_decision
 
@@ -274,9 +418,19 @@ def _resolve_router_turn(
     if not previous_question:
         return question, router_decision
 
-    merged_question = f"{previous_question.rstrip()} {question.strip()}".strip()
+    previous_question_for_merge = previous_question
+    if previous_router_decision is not None:
+        if previous_router_decision.clarification_reason == "invalid_dates":
+            previous_question_for_merge = strip_temporal_context(previous_question)
+
+    merged_question = (
+        f"{previous_question_for_merge.rstrip()} {question.strip()}".strip()
+    )
     merged_router_decision = build_router_decision(merged_question)
-    if merged_router_decision.intent == "out_of_scope":
+    if (
+        merged_router_decision.intent == "out_of_scope"
+        and not merged_router_decision.needs_clarification
+    ):
         return question, router_decision
 
     return merged_question, merged_router_decision
@@ -310,6 +464,12 @@ def build_analytics_graph(
 
         if injected_messages:
             state_update["messages"] = injected_messages
+
+        if router_decision.intent in {
+            "strategy_follow_up",
+            "diagnostic_follow_up",
+        }:
+            return Command(update=state_update, goto="insight_synthesizer")
 
         if _router_decision_short_circuits(router_decision):
             state_update["final_answer"] = (
@@ -414,9 +574,70 @@ def build_analytics_graph(
 
     def insight_synthesizer_node(state: AnalyticsGraphState) -> dict[str, Any]:
         current_turn_messages = _get_current_turn_messages(state)
+        router_decision = _deserialize_router_decision(state.get("router_decision"))
         tools_used = _collect_tools_used(current_turn_messages)
         preset_answer = state.get("final_answer")
         tool_messages = _collect_tool_messages(current_turn_messages)
+
+        if router_decision is not None and router_decision.intent in {
+            "strategy_follow_up",
+            "diagnostic_follow_up",
+        }:
+            question = _resolve_effective_question(state)
+            strategy_context = _build_strategy_follow_up_context(state)
+            if strategy_context is None:
+                return {
+                    "final_answer": OUT_OF_SCOPE_MESSAGE,
+                    "tools_used": tools_used,
+                }
+
+            try:
+                synthesized_response = cast(
+                    AIMessage,
+                    synthesis_llm.invoke(
+                        [
+                            SystemMessage(
+                                content=(
+                                    STRATEGY_FOLLOW_UP_SYSTEM_PROMPT
+                                    if router_decision.intent == "strategy_follow_up"
+                                    else DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT
+                                )
+                            ),
+                            HumanMessage(
+                                content=(
+                                    f"Pergunta de follow-up:\n{question}\n\n"
+                                    f"Contexto analitico anterior:\n{strategy_context}"
+                                )
+                            ),
+                        ]
+                    ),
+                )
+            except Exception as exc:
+                if is_llm_timeout_error(exc):
+                    raise LlmTimeoutError(
+                        "Tempo limite excedido ao sintetizar o follow-up contextual.",
+                        source="insight_synthesizer",
+                        error_type=type(exc).__name__,
+                        debug_message=_stringify_exception(exc),
+                    ) from exc
+                return {
+                    "messages": [_build_temporary_failure_ai_message()],
+                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+                    "tools_used": tools_used,
+                    "debug_errors": [
+                        _build_debug_error(
+                            "insight_synthesizer",
+                            message=_stringify_exception(exc),
+                            error_type=type(exc).__name__,
+                        )
+                    ],
+                }
+
+            return {
+                "messages": [synthesized_response],
+                "final_answer": _content_to_text(synthesized_response.content).strip(),
+                "tools_used": tools_used,
+            }
 
         if preset_answer and not tool_messages:
             return {
