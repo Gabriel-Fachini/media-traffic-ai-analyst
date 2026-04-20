@@ -25,10 +25,10 @@ Organizar as proximas melhorias do MVP com foco direto nos criterios de avaliaca
 
 **Meta de percepcao:** deixar evidente para o avaliador que existe uma arquitetura deliberada de agente, com roteamento claro, tool calling real e separacao entre interpretacao, execucao e sintese.
 
-- [ ] 1.1 Criar um contrato explicito de decisao do roteador, com campos como `intent`, `normalized_params`, `needs_clarification` e `refusal_reason`.
-- [ ] 1.2 Extrair a logica de interpretacao e normalizacao da pergunta para um modulo proprio, reduzindo a concentracao de responsabilidade em `app/graph/workflow.py`.
-- [ ] 1.3 Fazer o `workflow.py` consumir a decisao estruturada do roteador, em vez de depender apenas de condicoes espalhadas no proprio arquivo.
-- [ ] 1.4 Padronizar o fluxo conceitual como `Router -> Tool Executor -> Insight Synthesizer -> API/CLI`.
+- [x] 1.1 Criar um contrato explicito de decisao do roteador, com campos como `intent`, `normalized_params`, `needs_clarification` e `refusal_reason`.
+- [x] 1.2 Extrair a logica de interpretacao e normalizacao da pergunta para um modulo proprio, reduzindo a concentracao de responsabilidade em `app/graph/workflow.py`.
+- [x] 1.3 Fazer o `workflow.py` consumir a decisao estruturada do roteador, em vez de depender apenas de condicoes espalhadas no proprio arquivo.
+- [x] 1.4 Padronizar o fluxo conceitual como `Router -> Tool Executor -> Insight Synthesizer -> API/CLI`.
 - [ ] 1.5 Adicionar testes automatizados com `pytest` para o roteamento, cobrindo pelo menos: volume, performance, fora de escopo, falta de datas, datas invalidas e comparacao entre canais.
 
 ### **Definicao de pronto para este criterio**

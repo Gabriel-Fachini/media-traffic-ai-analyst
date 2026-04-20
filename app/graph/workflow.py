@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
 from functools import lru_cache
 import json
 import re
-import unicodedata
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
@@ -19,162 +17,42 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Command
 
 from app.graph.llm import (
     LlmTimeoutError,
     build_analytics_llm,
-    build_tool_enabled_llm,
     is_llm_timeout_error,
 )
-from app.graph.prompts import (
-    FINAL_RESPONSE_SYSTEM_PROMPT,
-    build_conversation_system_prompt,
+from app.graph.prompts import FINAL_RESPONSE_SYSTEM_PROMPT
+from app.graph.router import (
+    EMPTY_QUESTION_MESSAGE,
+    INVALID_DATES_MESSAGE,
+    MISSING_DATES_MESSAGE,
+    OUT_OF_SCOPE_MESSAGE,
+    UNSUPPORTED_DIMENSION_MESSAGE,
+    build_router_decision,
 )
+from app.schemas.router import RouterDecision
 from app.graph.tools import get_analytics_tools
 from app.utils.config import Settings, get_settings
-
-DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
-DIMENSION_REQUEST_PATTERN = re.compile(
-    r"\b(?:por|by|per)\s+([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\b"
-)
-QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
-SUPPORTED_CHANNEL_TOKENS = frozenset(
-    {
-        "canal",
-        "canais",
-        "channel",
-        "channels",
-    }
-)
-SUPPORTED_VOLUME_SIGNAL_TOKENS = frozenset(
-    {
-        "trafego",
-        "traffic",
-        "volume",
-    }
-)
-SUPPORTED_USER_METRIC_TOKENS = frozenset(
-    {
-        "usuario",
-        "usuarios",
-        "user",
-        "users",
-    }
-)
-SUPPORTED_PERFORMANCE_METRIC_TOKENS = frozenset(
-    {
-        "pedido",
-        "pedidos",
-        "order",
-        "orders",
-        "receita",
-        "revenue",
-        "ranking",
-        "performance",
-        "desempenho",
-        "melhor",
-        "top",
-    }
-)
-SUPPORTED_SOURCE_TOKENS = frozenset(
-    {
-        "search",
-        "organic",
-        "facebook",
-        "instagram",
-    }
-)
-SUPPORTED_ANALYTICS_DIMENSION_TOKENS = frozenset(
-    {
-        "canal",
-        "canais",
-        "channel",
-        "channels",
-        "origem",
-        "origens",
-        "source",
-        "sources",
-        "traffic_source",
-        "search",
-        "organic",
-        "facebook",
-        "instagram",
-    }
-)
-UNSUPPORTED_METRIC_TOKENS = frozenset(
-    {
-        "cac",
-        "roas",
-        "roi",
-        "ltv",
-        "ctr",
-        "cpc",
-        "cpm",
-        "impressao",
-        "impressoes",
-        "impression",
-        "impressions",
-        "clique",
-        "cliques",
-        "click",
-        "clicks",
-        "campanha",
-        "campanhas",
-        "campaign",
-        "campaigns",
-        "anuncio",
-        "anuncios",
-        "ad",
-        "ads",
-        "criativo",
-        "criativos",
-        "creative",
-        "creatives",
-        "empresa",
-        "empresas",
-        "company",
-        "companies",
-    }
-)
-
-MISSING_DATES_MESSAGE = (
-    "Preciso que voce informe start_date e end_date no formato YYYY-MM-DD para eu "
-    "consultar os dados. Exemplo: 2024-01-01 ate 2024-01-31."
-)
-INVALID_DATES_MESSAGE = (
-    "As datas informadas sao invalidas. Use start_date e end_date reais no formato "
-    "YYYY-MM-DD, por exemplo 2024-01-01 ate 2024-01-31."
-)
-UNSUPPORTED_DIMENSION_MESSAGE = (
-    "No MVP atual eu so consigo analisar trafego, pedidos e receita por canal "
-    "(traffic_source). Reformule a pergunta nesse escopo e, quando a consulta "
-    "depender de dados, informe start_date e end_date em YYYY-MM-DD."
-)
-EMPTY_QUESTION_MESSAGE = (
-    "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."
-)
 TEMPORARY_LLM_FAILURE_MESSAGE = (
     "Nao consegui concluir a analise agora por uma falha temporaria. Tente novamente em instantes."
 )
 TEMPORARY_TOOL_FAILURE_MESSAGE = (
     "Nao consegui consultar os dados agora por uma falha temporaria. Tente novamente em instantes."
 )
+DATE_TOKEN_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 class AnalyticsGraphState(TypedDict, total=False):
     question: str
     messages: Annotated[list[AnyMessage], add_messages]
-    next_step: Literal["conversation", "tools", "final_response"]
+    router_decision: dict[str, Any]
+    resolved_question: str
     turn_start_index: int
     final_answer: str
     tools_used: list[str]
-
-
-def _normalize_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    return "".join(
-        character for character in normalized if not unicodedata.combining(character)
-    ).lower()
 
 
 def _content_to_text(content: Any) -> str:
@@ -214,84 +92,24 @@ def _resolve_question(state: AnalyticsGraphState) -> str:
     return ""
 
 
-def _extract_iso_dates(question: str) -> list[str]:
-    return DATE_TOKEN_PATTERN.findall(question)
-
-
-def _extract_requested_dimensions(question: str) -> list[str]:
-    normalized_question = _normalize_text(question)
-    return [
-        requested_dimension.strip().replace(" ", "_")
-        for requested_dimension in DIMENSION_REQUEST_PATTERN.findall(normalized_question)
-    ]
-
-
-def _extract_valid_and_invalid_iso_dates(
-    question: str,
-) -> tuple[list[date], list[str]]:
-    valid_dates: list[date] = []
-    invalid_dates: list[str] = []
-
-    for date_token in _extract_iso_dates(question):
-        try:
-            valid_dates.append(date.fromisoformat(date_token))
-        except ValueError:
-            invalid_dates.append(date_token)
-
-    return valid_dates, invalid_dates
-
-
-def _extract_question_tokens(question: str) -> set[str]:
-    return set(QUESTION_TOKEN_PATTERN.findall(_normalize_text(question)))
-
-
-def _question_requests_unsupported_dimension(question: str) -> bool:
-    requested_dimensions = _extract_requested_dimensions(question)
-    if not requested_dimensions:
-        return False
-
-    return any(
-        requested_dimension not in SUPPORTED_ANALYTICS_DIMENSION_TOKENS
-        for requested_dimension in requested_dimensions
-    )
-
-
-def _question_supports_date_clarification(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    if not question_tokens:
-        return False
-
-    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
-        return False
-
-    if _question_requests_unsupported_dimension(question):
-        return False
-
-    has_performance_metric = bool(
-        question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS
-    )
-    has_user_metric = bool(question_tokens & SUPPORTED_USER_METRIC_TOKENS)
-    has_channel_context = bool(
-        question_tokens
-        & (
-            SUPPORTED_CHANNEL_TOKENS
-            | SUPPORTED_VOLUME_SIGNAL_TOKENS
-            | SUPPORTED_SOURCE_TOKENS
-        )
-    )
-
-    return has_performance_metric or (has_user_metric and has_channel_context)
-
-
-def _get_last_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            return message
-    return None
+def _resolve_effective_question(state: AnalyticsGraphState) -> str:
+    resolved_question = state.get("resolved_question", "").strip()
+    if resolved_question:
+        return resolved_question
+    return _resolve_question(state)
 
 
 def _collect_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
     return [message for message in messages if isinstance(message, ToolMessage)]
+
+
+def _get_last_human_question(messages: list[AnyMessage]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            question = _content_to_text(message.content).strip()
+            if question:
+                return question
+    return ""
 
 
 def _resolve_turn_start_index(state: AnalyticsGraphState) -> int:
@@ -364,134 +182,183 @@ def _build_temporary_failure_ai_message() -> AIMessage:
     return AIMessage(content=TEMPORARY_LLM_FAILURE_MESSAGE)
 
 
+def _serialize_router_decision(router_decision: RouterDecision) -> dict[str, Any]:
+    return router_decision.model_dump(mode="json")
+
+
+def _deserialize_router_decision(
+    router_decision: dict[str, Any] | RouterDecision | None,
+) -> RouterDecision | None:
+    if router_decision is None:
+        return None
+    if isinstance(router_decision, RouterDecision):
+        return router_decision
+    return RouterDecision.model_validate(router_decision)
+
+
+def _router_decision_short_circuits(router_decision: RouterDecision) -> bool:
+    return (
+        router_decision.needs_clarification
+        or router_decision.refusal_reason is not None
+    )
+
+
+def _resolve_expected_tool_name(router_decision: RouterDecision | None) -> str | None:
+    if router_decision is None:
+        return None
+    if router_decision.intent == "traffic_volume":
+        return "traffic_volume_analyzer"
+    if router_decision.intent == "channel_performance":
+        return "channel_performance_analyzer"
+    return None
+
+
+def _build_router_tool_args(router_decision: RouterDecision) -> dict[str, Any]:
+    normalized_params = router_decision.normalized_params
+    return {
+        "traffic_source": normalized_params.traffic_source,
+        "start_date": (
+            normalized_params.start_date.isoformat()
+            if normalized_params.start_date is not None
+            else None
+        ),
+        "end_date": (
+            normalized_params.end_date.isoformat()
+            if normalized_params.end_date is not None
+            else None
+        ),
+    }
+
+
+def _question_contains_iso_dates(question: str) -> bool:
+    return bool(DATE_TOKEN_PATTERN.search(question))
+
+
+def _resolve_router_turn(
+    state: AnalyticsGraphState,
+    question: str,
+) -> tuple[str, RouterDecision]:
+    router_decision = build_router_decision(question)
+    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
+
+    if (
+        previous_router_decision is None
+        or not previous_router_decision.needs_clarification
+        or not _question_contains_iso_dates(question)
+        or router_decision.intent != "out_of_scope"
+    ):
+        return question, router_decision
+
+    previous_question = _get_last_human_question(list(state.get("messages", [])))
+    if not previous_question:
+        return question, router_decision
+
+    merged_question = f"{previous_question.rstrip()} {question.strip()}".strip()
+    merged_router_decision = build_router_decision(merged_question)
+    if merged_router_decision.intent == "out_of_scope":
+        return question, router_decision
+
+    return merged_question, merged_router_decision
+
+
 def build_analytics_graph(
     settings: Settings | None = None,
     *,
-    tool_enabled_llm: Any | None = None,
     response_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
     checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
     tools_by_name = {tool.name: tool for tool in analytics_tools}
-    conversation_llm = tool_enabled_llm or build_tool_enabled_llm(settings)
     synthesis_llm = response_llm or build_analytics_llm(settings)
-    conversation_system_prompt = build_conversation_system_prompt()
 
-    def router_node(state: AnalyticsGraphState) -> dict[str, Any]:
+    def router_node(
+        state: AnalyticsGraphState,
+    ) -> Command[Literal["tool_executor", "insight_synthesizer"]]:
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
-        if not question:
-            return {
-                "final_answer": EMPTY_QUESTION_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
         injected_messages = _build_turn_question_messages(state)
-
-        if _question_requests_unsupported_dimension(question):
-            return {
-                "messages": injected_messages,
-                "final_answer": UNSUPPORTED_DIMENSION_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
-        should_request_dates = _question_supports_date_clarification(question)
-        valid_dates, invalid_dates = _extract_valid_and_invalid_iso_dates(question)
-        if should_request_dates and invalid_dates:
-            return {
-                "messages": injected_messages,
-                "final_answer": INVALID_DATES_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
-        if should_request_dates and len(valid_dates) < 2:
-            return {
-                "messages": injected_messages,
-                "final_answer": MISSING_DATES_MESSAGE,
-                "next_step": "final_response",
-                "turn_start_index": turn_start_index,
-            }
-
-        return {
-            "next_step": "conversation",
+        resolved_question, router_decision = _resolve_router_turn(state, question)
+        serialized_router_decision = _serialize_router_decision(router_decision)
+        state_update: dict[str, Any] = {
+            "router_decision": serialized_router_decision,
+            "resolved_question": resolved_question,
             "turn_start_index": turn_start_index,
         }
 
-    def conversation_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        existing_messages = list(state.get("messages", []))
-        injected_messages = _build_turn_question_messages(state)
-
         if injected_messages:
-            existing_messages = [*existing_messages, *injected_messages]
+            state_update["messages"] = injected_messages
 
-        try:
-            response = cast(
-                AIMessage,
-                conversation_llm.invoke(
-                    [SystemMessage(content=conversation_system_prompt), *existing_messages]
-                ),
+        if _router_decision_short_circuits(router_decision):
+            state_update["final_answer"] = (
+                router_decision.response_message or EMPTY_QUESTION_MESSAGE
             )
-        except Exception as exc:
-            if is_llm_timeout_error(exc):
-                raise LlmTimeoutError("Tempo limite excedido ao consultar o LLM.") from exc
-            return {
-                "messages": [*injected_messages, _build_temporary_failure_ai_message()],
-                "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-            }
+            return Command(update=state_update, goto="insight_synthesizer")
 
-        return {"messages": [*injected_messages, response]}
+        return Command(update=state_update, goto="tool_executor")
 
-    def execute_tools_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        messages = list(state.get("messages", []))
-        last_ai_message = _get_last_ai_message(messages)
-        if last_ai_message is None or not last_ai_message.tool_calls:
-            return {}
+    def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
+        router_decision = _deserialize_router_decision(state.get("router_decision"))
 
         tool_messages: list[ToolMessage] = []
+        expected_tool_name = _resolve_expected_tool_name(router_decision)
 
-        for tool_call in last_ai_message.tool_calls:
-            tool_name = tool_call["name"]
-            tool_call_id = str(tool_call.get("id") or tool_name)
-            tool = tools_by_name.get(tool_name)
-
-            if tool is None:
-                tool_messages.append(
+        if router_decision is None or expected_tool_name is None:
+            return {
+                "messages": [
                     ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
+                        tool_call_id="router-decision-missing",
+                        name="unknown",
                         status="error",
-                        content=f"Tool desconhecida solicitada pelo modelo: {tool_name}.",
+                        content=(
+                            "Nao foi possivel resolver uma tool a partir da decisao "
+                            "estruturada do roteador."
+                        ),
                     )
-                )
-                continue
+                ]
+            }
 
-            try:
-                result = tool.invoke(tool_call)
-                tool_messages.append(
+        resolved_tool_args = _build_router_tool_args(router_decision)
+        tool = tools_by_name.get(expected_tool_name)
+
+        if tool is None:
+            return {
+                "messages": [
                     ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
-                        content=_serialize_tool_result(result),
-                        artifact=result,
-                    )
-                )
-            except Exception as exc:
-                tool_messages.append(
-                    ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
+                        tool_call_id=expected_tool_name,
+                        name=expected_tool_name,
                         status="error",
-                        content=f"Falha temporaria ao executar {tool_name}: {exc}",
+                        content=(
+                            "A tool esperada pela decisao do roteador nao esta "
+                            f"registrada: {expected_tool_name}."
+                        ),
                     )
+                ]
+            }
+
+        try:
+            result = tool.invoke(resolved_tool_args)
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=expected_tool_name,
+                    name=expected_tool_name,
+                    content=_serialize_tool_result(result),
+                    artifact=result,
                 )
+            )
+        except Exception as exc:
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=expected_tool_name,
+                    name=expected_tool_name,
+                    status="error",
+                    content=f"Falha temporaria ao executar {expected_tool_name}: {exc}",
+                )
+            )
 
         return {"messages": tool_messages}
 
-    def final_response_node(state: AnalyticsGraphState) -> dict[str, Any]:
+    def insight_synthesizer_node(state: AnalyticsGraphState) -> dict[str, Any]:
         current_turn_messages = _get_current_turn_messages(state)
         tools_used = _collect_tools_used(current_turn_messages)
         preset_answer = state.get("final_answer")
@@ -510,7 +377,7 @@ def build_analytics_graph(
             }
 
         if tool_messages:
-            question = _resolve_question(state)
+            question = _resolve_effective_question(state)
             tool_context = "\n\n".join(
                 f"Tool: {message.name}\nResultado:\n{_content_to_text(message.content)}"
                 for message in tool_messages
@@ -546,59 +413,19 @@ def build_analytics_graph(
                 "tools_used": tools_used,
             }
 
-        last_ai_message = _get_last_ai_message(current_turn_messages)
-        if last_ai_message is None:
-            return {
-                "final_answer": EMPTY_QUESTION_MESSAGE,
-                "tools_used": tools_used,
-            }
-
         return {
-            "final_answer": _content_to_text(last_ai_message.content).strip(),
+            "final_answer": TEMPORARY_TOOL_FAILURE_MESSAGE,
             "tools_used": tools_used,
         }
 
-    def route_after_router(
-        state: AnalyticsGraphState,
-    ) -> Literal["conversation", "final_response"]:
-        return cast(
-            Literal["conversation", "final_response"],
-            state.get("next_step", "final_response"),
-        )
-
-    def route_after_conversation(
-        state: AnalyticsGraphState,
-    ) -> Literal["tools", "final_response"]:
-        last_ai_message = _get_last_ai_message(list(state.get("messages", [])))
-        if last_ai_message and last_ai_message.tool_calls:
-            return "tools"
-        return "final_response"
-
     graph = StateGraph(AnalyticsGraphState)
     graph.add_node("router", router_node)
-    graph.add_node("conversation", conversation_node)
-    graph.add_node("tools", execute_tools_node)
-    graph.add_node("final_response", final_response_node)
+    graph.add_node("tool_executor", tool_executor_node)
+    graph.add_node("insight_synthesizer", insight_synthesizer_node)
 
     graph.add_edge(START, "router")
-    graph.add_conditional_edges(
-        "router",
-        route_after_router,
-        {
-            "conversation": "conversation",
-            "final_response": "final_response",
-        },
-    )
-    graph.add_conditional_edges(
-        "conversation",
-        route_after_conversation,
-        {
-            "tools": "tools",
-            "final_response": "final_response",
-        },
-    )
-    graph.add_edge("tools", "final_response")
-    graph.add_edge("final_response", END)
+    graph.add_edge("tool_executor", "insight_synthesizer")
+    graph.add_edge("insight_synthesizer", END)
 
     return graph.compile(checkpointer=checkpointer)
 
@@ -644,6 +471,7 @@ __all__ = [
     "AnalyticsGraphState",
     "INVALID_DATES_MESSAGE",
     "MISSING_DATES_MESSAGE",
+    "OUT_OF_SCOPE_MESSAGE",
     "TEMPORARY_LLM_FAILURE_MESSAGE",
     "TEMPORARY_TOOL_FAILURE_MESSAGE",
     "UNSUPPORTED_DIMENSION_MESSAGE",
