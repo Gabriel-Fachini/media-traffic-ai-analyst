@@ -351,6 +351,16 @@ def _resolve_router_turn(
     question: str,
 ) -> tuple[str, RouterDecision]:
     router_decision = build_router_decision(question)
+    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
+    follow_up_changes_traffic_source = (
+        previous_router_decision is not None
+        and question_introduces_new_traffic_source(
+            question,
+            previous_traffic_source=(
+                previous_router_decision.normalized_params.traffic_source
+            ),
+        )
+    )
     follow_up_intent = _resolve_follow_up_intent(
         question,
         has_prior_context=_has_prior_successful_tool_context(state),
@@ -363,6 +373,7 @@ def _resolve_router_turn(
                 and router_decision.clarification_reason == "missing_dates"
             )
         )
+        and not follow_up_changes_traffic_source
         and follow_up_intent is not None
     ):
         return (
@@ -372,17 +383,6 @@ def _resolve_router_turn(
                 normalized_params=router_decision.normalized_params,
             ),
         )
-
-    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
-    follow_up_changes_traffic_source = (
-        previous_router_decision is not None
-        and question_introduces_new_traffic_source(
-            question,
-            previous_traffic_source=(
-                previous_router_decision.normalized_params.traffic_source
-            ),
-        )
-    )
 
     should_merge_temporal_follow_up = (
         previous_router_decision is not None

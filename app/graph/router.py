@@ -530,7 +530,9 @@ def _question_contains_metric_follow_up_signal(question: str) -> bool:
 
 def question_is_metric_clarification_follow_up(question: str) -> bool:
     question_tokens = _extract_question_tokens(question)
-    if not question_tokens or len(question_tokens) > 4:
+    if not question_tokens:
+        return False
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
         return False
     return _question_contains_metric_follow_up_signal(question)
 
@@ -790,10 +792,27 @@ def build_router_decision(
         reference_date=resolved_reference_date,
     )
     all_invalid_dates = [*invalid_dates, *invalid_relative_tokens]
-    if all_invalid_dates:
+    has_supported_context = _question_has_supported_context(question)
+    has_reversed_explicit_dates = len(valid_dates) >= 2 and valid_dates[0] > valid_dates[1]
+    if all_invalid_dates and (
+        intent != "out_of_scope" or has_supported_context
+    ):
         return RouterDecision(
             intent=intent,
             normalized_params=normalized_params,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
+    if has_reversed_explicit_dates and (
+        intent != "out_of_scope" or has_supported_context
+    ):
+        return RouterDecision(
+            intent=intent,
+            normalized_params=RouterNormalizedParams(
+                traffic_source=normalized_params.traffic_source
+            ),
             needs_clarification=True,
             clarification_reason="invalid_dates",
             response_message=INVALID_DATES_MESSAGE,
@@ -829,17 +848,6 @@ def build_router_decision(
             needs_clarification=True,
             clarification_reason="missing_dates",
             response_message=MISSING_DATES_MESSAGE,
-        )
-
-    if len(valid_dates) >= 2 and valid_dates[0] > valid_dates[1]:
-        return RouterDecision(
-            intent=intent,
-            normalized_params=RouterNormalizedParams(
-                traffic_source=normalized_params.traffic_source
-            ),
-            needs_clarification=True,
-            clarification_reason="invalid_dates",
-            response_message=INVALID_DATES_MESSAGE,
         )
 
     return RouterDecision(
