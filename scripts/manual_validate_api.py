@@ -102,6 +102,28 @@ def build_scenarios(*, show_body: bool) -> list[ValidationScenario]:
             runner=lambda client: run_thread_continuity(client, show_body=show_body),
         ),
         ValidationScenario(
+            name="strategy-follow-up-after-analysis",
+            description=(
+                "Valida que um follow-up estrategico no mesmo thread continua a "
+                "conversa a partir da analise anterior, sem cair em out_of_scope."
+            ),
+            runner=lambda client: run_strategy_follow_up_after_analysis(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
+            name="diagnostic-follow-up-after-analysis",
+            description=(
+                "Valida que um follow-up diagnostico no mesmo thread continua a "
+                "conversa a partir da analise anterior, sem cair em out_of_scope."
+            ),
+            runner=lambda client: run_diagnostic_follow_up_after_analysis(
+                client,
+                show_body=show_body,
+            ),
+        ),
+        ValidationScenario(
             name="clarification-follow-up-dates-only",
             description=(
                 "Valida que um follow-up so com datas reutiliza o contexto original "
@@ -542,6 +564,160 @@ def run_thread_continuity(client: TestClient, *, show_body: bool) -> None:
         )
     print_check(
         "contexto cresceu entre chamadas: "
+        f"{first_body.metadata.context_message_count} -> "
+        f"{second_body.metadata.context_message_count}"
+    )
+
+
+def run_strategy_follow_up_after_analysis(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": (
+            "Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?"
+        ),
+    }
+    print_step("Primeira chamada executa a analise base para abrir contexto")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if "channel_performance_analyzer" not in first_body.tools_used:
+        raise AssertionError(
+            "A analise base deveria usar channel_performance_analyzer. "
+            f"Recebido={first_body.tools_used}"
+        )
+    print_check("primeira chamada executou a tool financeira esperada")
+    if first_body.metadata is None:
+        raise AssertionError("Metadata ausente na analise base.")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": (
+            "Como podemos reduzir essa forte dependencia de Search? "
+            "Por exemplo, como podemos melhorar o desempenho do canal Facebook?"
+        ),
+    }
+    print_step("Segunda chamada faz follow-up estrategico no mesmo thread_id")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post("/query", json=second_payload)
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+
+    if second_body.answer == UNSUPPORTED_DIMENSION_MESSAGE:
+        raise AssertionError(
+            "O follow-up estrategico nao deveria cair em dimensao nao suportada."
+        )
+    print_check("segunda chamada nao caiu em unsupported_dimension")
+    if not second_body.answer.strip():
+        raise AssertionError("O follow-up estrategico retornou resposta vazia.")
+    print_check("segunda chamada retornou uma resposta textual")
+    if second_body.metadata is None:
+        raise AssertionError("Metadata ausente no follow-up estrategico.")
+    if second_body.metadata.thread_id != thread_id:
+        raise AssertionError("O follow-up estrategico nao preservou o thread_id.")
+    print_check("segunda chamada preservou o thread_id informado")
+    if (
+        second_body.metadata.context_message_count
+        <= first_body.metadata.context_message_count
+    ):
+        raise AssertionError(
+            "O contexto nao cresceu apos o follow-up estrategico. "
+            f"Primeira={first_body.metadata.context_message_count}, "
+            f"segunda={second_body.metadata.context_message_count}"
+        )
+    print_check(
+        "contexto cresceu entre a analise base e o follow-up estrategico: "
+        f"{first_body.metadata.context_message_count} -> "
+        f"{second_body.metadata.context_message_count}"
+    )
+
+
+def run_diagnostic_follow_up_after_analysis(
+    client: TestClient,
+    *,
+    show_body: bool,
+) -> None:
+    del show_body
+    thread_id = f"api-validation-{uuid4()}"
+    first_payload = {
+        "thread_id": thread_id,
+        "question": (
+            "Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?"
+        ),
+    }
+    print_step("Primeira chamada executa a analise base para abrir contexto")
+    print_request("POST", "/query", first_payload)
+    first_response = client.post("/query", json=first_payload)
+    print_http_response(first_response)
+    assert_status_code(first_response, 200)
+    print_check("primeira chamada respondeu 200")
+    first_body = parse_query_response(first_response)
+
+    if "channel_performance_analyzer" not in first_body.tools_used:
+        raise AssertionError(
+            "A analise base deveria usar channel_performance_analyzer. "
+            f"Recebido={first_body.tools_used}"
+        )
+    print_check("primeira chamada executou a tool financeira esperada")
+    if first_body.metadata is None:
+        raise AssertionError("Metadata ausente na analise base.")
+
+    second_payload = {
+        "thread_id": thread_id,
+        "question": (
+            "O que explica essa concentracao de receita em Search e o Facebook "
+            "ficar tao atras?"
+        ),
+    }
+    print_step("Segunda chamada faz follow-up diagnostico no mesmo thread_id")
+    print_request("POST", "/query", second_payload)
+    second_response = client.post("/query", json=second_payload)
+    print_http_response(second_response)
+    assert_status_code(second_response, 200)
+    print_check("segunda chamada respondeu 200")
+    second_body = parse_query_response(second_response)
+
+    if second_body.answer == UNSUPPORTED_DIMENSION_MESSAGE:
+        raise AssertionError(
+            "O follow-up diagnostico nao deveria cair em dimensao nao suportada."
+        )
+    print_check("segunda chamada nao caiu em unsupported_dimension")
+    if second_body.answer == MISSING_DATES_MESSAGE:
+        raise AssertionError(
+            "O follow-up diagnostico nao deveria pedir datas novamente quando ja "
+            "existe contexto analitico valido no thread."
+        )
+    print_check("segunda chamada nao repetiu a clarificacao de datas")
+    if not second_body.answer.strip():
+        raise AssertionError("O follow-up diagnostico retornou resposta vazia.")
+    print_check("segunda chamada retornou uma resposta textual")
+    if second_body.metadata is None:
+        raise AssertionError("Metadata ausente no follow-up diagnostico.")
+    if second_body.metadata.thread_id != thread_id:
+        raise AssertionError("O follow-up diagnostico nao preservou o thread_id.")
+    print_check("segunda chamada preservou o thread_id informado")
+    if (
+        second_body.metadata.context_message_count
+        <= first_body.metadata.context_message_count
+    ):
+        raise AssertionError(
+            "O contexto nao cresceu apos o follow-up diagnostico. "
+            f"Primeira={first_body.metadata.context_message_count}, "
+            f"segunda={second_body.metadata.context_message_count}"
+        )
+    print_check(
+        "contexto cresceu entre a analise base e o follow-up diagnostico: "
         f"{first_body.metadata.context_message_count} -> "
         f"{second_body.metadata.context_message_count}"
     )

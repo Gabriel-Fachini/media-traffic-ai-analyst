@@ -125,6 +125,59 @@ SUPPORTED_COMPARISON_TOKENS = frozenset(
         "vs",
     }
 )
+STRATEGY_FOLLOW_UP_TOKENS = frozenset(
+    {
+        "acao",
+        "acoes",
+        "aumentar",
+        "crescer",
+        "dependencia",
+        "dependente",
+        "diminuir",
+        "diversificar",
+        "estrategia",
+        "estrategias",
+        "fortalecer",
+        "melhorar",
+        "melhoria",
+        "otimizacao",
+        "otimizar",
+        "passo",
+        "passos",
+        "priorizar",
+        "proximo",
+        "proximos",
+        "reduzir",
+        "recomendacao",
+        "recomendacoes",
+        "recomenda",
+        "recomendar",
+        "sugestao",
+        "sugestoes",
+    }
+)
+DIAGNOSTIC_FOLLOW_UP_TOKENS = frozenset(
+    {
+        "causa",
+        "causas",
+        "diagnostico",
+        "entender",
+        "explica",
+        "explicacao",
+        "explicar",
+        "fator",
+        "fatores",
+        "hipotese",
+        "hipoteses",
+        "motivo",
+        "motivos",
+        "razao",
+        "razoes",
+    }
+)
+DIAGNOSTIC_FOLLOW_UP_PATTERN = re.compile(
+    r"\b(?:por que|porque|o que explica|como explicar|qual a explicacao)\b"
+)
 SUPPORTED_ANALYTICS_DIMENSION_TOKENS = frozenset(
     {
         "canal",
@@ -482,6 +535,51 @@ def question_is_metric_clarification_follow_up(question: str) -> bool:
     return _question_contains_metric_follow_up_signal(question)
 
 
+def question_is_strategy_follow_up(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    has_strategy_signal = bool(question_tokens & STRATEGY_FOLLOW_UP_TOKENS)
+    has_analytics_anchor = bool(
+        question_tokens
+        & (
+            SUPPORTED_CHANNEL_TOKENS
+            | SUPPORTED_SOURCE_TOKENS
+            | SUPPORTED_VOLUME_SIGNAL_TOKENS
+            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
+        )
+    )
+    return has_strategy_signal and has_analytics_anchor
+
+
+def question_is_diagnostic_follow_up(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    normalized_question = _normalize_text(question)
+    has_diagnostic_signal = bool(
+        question_tokens & DIAGNOSTIC_FOLLOW_UP_TOKENS
+    ) or bool(DIAGNOSTIC_FOLLOW_UP_PATTERN.search(normalized_question))
+    has_analytics_anchor = bool(
+        question_tokens
+        & (
+            SUPPORTED_CHANNEL_TOKENS
+            | SUPPORTED_SOURCE_TOKENS
+            | SUPPORTED_VOLUME_SIGNAL_TOKENS
+            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
+        )
+    )
+    return has_diagnostic_signal and has_analytics_anchor
+
+
 def question_introduces_new_traffic_source(
     question: str,
     *,
@@ -758,8 +856,10 @@ __all__ = [
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "UNSUPPORTED_METRIC_MESSAGE",
     "build_router_decision",
+    "question_is_diagnostic_follow_up",
     "question_introduces_new_traffic_source",
     "question_is_metric_clarification_follow_up",
+    "question_is_strategy_follow_up",
     "question_contains_temporal_signal",
     "strip_temporal_context",
 ]

@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 RouterIntent = Literal[
     "traffic_volume",
     "channel_performance",
+    "strategy_follow_up",
+    "diagnostic_follow_up",
     "ambiguous_analytics",
     "out_of_scope",
 ]
