@@ -118,29 +118,29 @@ def test_router_prioritizes_invalid_dates_when_detected() -> None:
         (
             "Como o Search performou ontem?",
             "ambiguous_analytics",
-            "ambiguous_metric",
+            None,
             "Search",
             date(2026, 4, 19),
             date(2026, 4, 19),
-            "volume de usuarios ou performance financeira",
+            None,
         ),
         (
             "Me mostre Search ontem.",
             "ambiguous_analytics",
-            "ambiguous_metric",
+            None,
             "Search",
             date(2026, 4, 19),
             date(2026, 4, 19),
-            "volume de usuarios ou performance financeira",
+            None,
         ),
         (
             "Quais canais foram melhores ontem?",
             "ambiguous_analytics",
-            "ambiguous_metric",
+            None,
             None,
             date(2026, 4, 19),
             date(2026, 4, 19),
-            "os canais",
+            None,
         ),
         (
             "Como o Search performou em 31/02/2026?",
@@ -225,7 +225,7 @@ def test_router_resolves_semantic_scenarios(
         (
             "Por que Organic ficou abaixo de Search entre 2024-01-01 e 2024-03-31?",
             "ambiguous_analytics",
-            "ambiguous_metric",
+            None,
             date(2024, 1, 1),
             date(2024, 3, 31),
         ),
@@ -250,6 +250,16 @@ def test_router_avoids_false_unsupported_dimension_refusals(
 def test_router_keeps_unsupported_dimension_for_real_dimension_request() -> None:
     decision = build_router_decision(
         "Qual foi a receita por campanha entre 2024-01-01 e 2024-01-31?",
+        reference_date=REFERENCE_DATE,
+    )
+
+    assert decision.intent == "out_of_scope"
+    assert decision.refusal_reason == "unsupported_dimension"
+
+
+def test_router_keeps_unsupported_dimension_for_campaign_question_without_por() -> None:
+    decision = build_router_decision(
+        "Qual campanha deu mais lucro no Facebook ontem?",
         reference_date=REFERENCE_DATE,
     )
 

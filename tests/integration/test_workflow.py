@@ -197,7 +197,6 @@ def test_graph_routes_strategy_follow_up_without_new_tool_execution(
     router_decision = _require_router_decision(second_state)
 
     assert "channel_performance_analyzer" in _require_list(first_state, "tools_used")
-    # Follow-up uses insight_synthesizer (FakeSynthesisLLM), not the agent.
     assert len(graph_bundle.tools.calls) == 1
     assert _require_list(second_state, "tools_used") == []
     assert _require_str(second_state, "final_answer") == (
@@ -502,6 +501,36 @@ def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     assert _require_str(second_state, "resolved_question") == "volume de trafego este mes total"
     assert router_decision.intent == "traffic_volume"
     assert router_decision.refusal_reason is None
+
+
+def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clarification() -> None:
+    graph_bundle = build_deterministic_graph_bundle()
+    thread_id = "ambiguous-analytics-clarification-thread"
+
+    first_state = invoke_analytics_graph(
+        "Como o Search performou ontem?",
+        graph=graph_bundle.graph,
+        thread_id=thread_id,
+    )
+    second_state = invoke_analytics_graph(
+        "volume de usuarios",
+        graph=graph_bundle.graph,
+        thread_id=thread_id,
+    )
+    router_decision = _require_router_decision(second_state)
+
+    assert "volume de usuarios ou performance financeira" in _require_str(
+        first_state, "final_answer"
+    )
+    assert "traffic_volume_analyzer" in _require_list(second_state, "tools_used")
+    assert (
+        _require_str(second_state, "resolved_question")
+        == "Como o Search performou ontem? volume de usuarios"
+    )
+    assert router_decision.intent == "traffic_volume"
+    assert router_decision.normalized_params.traffic_source == "Search"
+    assert router_decision.normalized_params.start_date is not None
+    assert router_decision.normalized_params.end_date is not None
 
 
 def test_graph_resets_final_answer_between_short_circuits(

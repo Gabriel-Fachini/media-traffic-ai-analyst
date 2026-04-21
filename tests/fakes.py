@@ -5,7 +5,7 @@ from datetime import date
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -154,6 +154,47 @@ class FakeAgentLLM:
                 return canonical
         return None
 
+    def _has_follow_up_context(self, messages: list[Any]) -> bool:
+        return any(
+            isinstance(message, SystemMessage)
+            and "Contexto analitico anterior do mesmo thread:" in _extract_text(message.content)
+            for message in messages
+        )
+
+    def _has_ambiguous_analytics_guidance(self, messages: list[Any]) -> bool:
+        return any(
+            isinstance(message, SystemMessage)
+            and "a pergunta esta no dominio, mas ainda esta ambigua entre volume de usuarios e performance financeira" in _extract_text(message.content)
+            for message in messages
+        )
+
+    def _build_follow_up_answer(self, messages: list[Any]) -> AIMessage:
+        question = ""
+        for message in reversed(messages):
+            if isinstance(message, HumanMessage):
+                question = _extract_text(message.content)
+                if question:
+                    break
+        return AIMessage(content=f"FOLLOW_UP::{question}")
+
+    def _build_ambiguous_metric_clarification(self, messages: list[Any]) -> AIMessage:
+        question = ""
+        for message in reversed(messages):
+            if isinstance(message, HumanMessage):
+                question = _extract_text(message.content)
+                if question:
+                    break
+
+        traffic_source = self._pick_traffic_source(question)
+        channel_label = traffic_source or "os canais"
+        return AIMessage(
+            content=(
+                f"Entendi a pergunta sobre {channel_label}, mas preciso alinhar o foco antes. "
+                "Voce quer ver volume de usuarios ou performance financeira "
+                "(receita e pedidos)?"
+            )
+        )
+
     def _has_tool_message(self, messages: list[Any]) -> bool:
         from langchain_core.messages import ToolMessage
 
@@ -176,8 +217,6 @@ class FakeAgentLLM:
                     tool_name = msg.name
                     break
             # Find the original human question.
-            from langchain_core.messages import HumanMessage
-
             question = ""
             for msg in messages:
                 if isinstance(msg, HumanMessage):
@@ -185,9 +224,11 @@ class FakeAgentLLM:
                     break
             return AIMessage(content=f"SYNTH::{tool_name}::{question}")
 
-        # First call: emit tool_calls to trigger tool execution.
-        # Concatenate ALL human messages to capture full context across turns.
-        from langchain_core.messages import HumanMessage
+        if self._has_follow_up_context(messages):
+            return self._build_follow_up_answer(messages)
+
+        if self._has_ambiguous_analytics_guidance(messages):
+            return self._build_ambiguous_metric_clarification(messages)
 
         all_human_text = " ".join(
             _extract_text(msg.content)

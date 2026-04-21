@@ -1,151 +1,224 @@
-# Checklist Manual de Testes — Validação Pré-Entrega
+# Checklist Final de Validação — Readiness para Entrega
 
-> **Como usar:** Suba a API com `poetry run fastapi dev` e use a CLI com `poetry run analyst-chat --debug`.
-> Marque cada item como ✅ (passa), ⚠️ (parcial) ou ❌ (falha) conforme resultado.
-
----
-
-## A — Arquitetura do Agente
-
-### A.1 Tool Calling Funciona End-to-End
-
-| # | Teste | Pergunta / Ação | Resultado Esperado | Status |
-|---|---|---|---|---|
-| A1.1 | Tool `traffic_volume_analyzer` é chamada | `"Quantos usuarios vieram de Search entre 2024-01-01 e 2024-01-31?"` | `tools_used: ["traffic_volume_analyzer"]`, resposta com user_count | ✅ |
-| A1.2 | Tool `channel_performance_analyzer` é chamada | `"Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"` | `tools_used: ["channel_performance_analyzer"]`, resposta com receita | ✅ |
-| A1.3 | Ambas tools com canal nulo | `"Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?"` | `tools_used` contém tool, resultado com múltiplos canais | ✅ |
-| A1.4 | Comparação entre canais | `"Compare Search e Organic entre 2024-01-01 e 2024-01-31."` | `tools_used: ["channel_performance_analyzer"]`, resposta com comparação | ✅ |
-
-### A.2 Router Classifica Intent Corretamente (verificar via debug)
-
-| # | Teste | Pergunta | Intent esperado no debug | Status |
-|---|---|---|---|---|
-| A2.1 | Volume de tráfego | `"Volume de trafego de Search nos ultimos 30 dias"` | `traffic_volume` | ✅ |
-| A2.2 | Performance financeira | `"Qual canal vendeu mais no ultimo mes?"` | `channel_performance` | ✅ |
-| A2.3 | Ambíguo | `"Como foi Search nos ultimos 7 dias?"` | `ambiguous_analytics` + clarificação | ✅ |
-| A2.4 | Fora de escopo | `"Qual o clima em São Paulo?"` | `out_of_scope` + recusa educada | ✅ |
-
-### A.3 Separação Prompt vs. Execução
-
-| # | Verificação | Como validar | Status |
-|---|---|---|---|
-| A3.1 | Prompts isolados em `prompts.py` | Abrir [prompts.py](file:///Users/gabriel_fachini/Desktop/repos/media-traffic-ai-analyst/app/graph/prompts.py) — não deve ter lógica de execução | ✅ |
-| A3.2 | Tools isoladas em `tools/` | Abrir [tools/](file:///Users/gabriel_fachini/Desktop/repos/media-traffic-ai-analyst/app/tools/) — SQL e lógica de dados separada | ✅ |
-| A3.3 | Orquestração no grafo | Abrir [workflow.py](file:///Users/gabriel_fachini/Desktop/repos/media-traffic-ai-analyst/app/graph/workflow.py) — nós do grafo não contêm SQL | ✅ |
+> Objetivo: validar se o projeto está realmente pronto para entrega contra os critérios de `case.md`, não apenas se "funciona no meu ambiente".
+>
+> Como usar:
+> 1. Rode os gates automatizados.
+> 2. Execute o checklist manual em ordem.
+> 3. Marque cada item como `✅`, `⚠️` ou `❌`.
+> 4. Só considere o projeto pronto quando todos os itens `P0` estiverem em `✅`.
 
 ---
 
-## B — Qualidade do Backend Python
+## 1. Gate de Aceite
 
-### B.1 API Funcional
+### 1.1 Condição mínima para considerar "pronto"
 
-| # | Teste | Como testar | Resultado Esperado | Status |
-|---|---|---|---|---|
-| B1.1 | Health check | `curl http://localhost:8000/health` | `{"status":"ok","environment":"dev"}` | ✅ |
-| B1.2 | Query válida | `curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d '{"question":"Receita de Search entre 2024-01-01 e 2024-01-31"}'` | 200 com `answer`, `tools_used`, `metadata` | ✅ |
-| B1.3 | Query vazia | `curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d '{"question":""}'` | 422 Validation Error | ✅ |
-| B1.4 | Debug header | Repetir B1.2 com `-H "X-Debug: true"` | `metadata.debug` populado com `resolved_question` e `router_decision` | ✅ |
-| B1.5 | Thread continuidade | Usar `thread_id` retornado de B1.2 em nova request | `thread_id_source: "provided"`, `context_message_count` > anterior | ✅ |
+| Prioridade | Condição | Status |
+| --- | --- | --- |
+| P0 | `poetry run verify --agent` passa | ✅ |
+| P0 | `poetry run pytest --agent` passa | ✅ |
+| P0 | API sobe e responde em `/health` e `/query` | ✅ |
+| P0 | CLI `analyst-chat` funciona contra a API local | ✅ |
+| P0 | Tool Calling real está demonstrável | ✅ |
+| P0 | Perguntas fora de escopo são tratadas corretamente | ✅ |
+| P0 | Respostas com dados trazem leitura útil de negócio, não apenas números | ✅ |
+| P0 | README final cobre setup, credenciais e arquitetura | ⬜ |
+| P0 | Repositório público no GitHub pronto para envio | ✅ |
+| P1 | `pytest -m live` passa com ambiente configurado | ✅ |
+| P1 | Multi-turn / `thread_id` demonstrado manualmente | ✅ |
+| P1 | `X-Debug` demonstra observabilidade suficiente para depuração | ✅ |
 
-### B.2 Tratamento de Erros
+### 1.2 Evidência automatizada atual
 
-| # | Teste | Como testar | Resultado Esperado | Status |
-|---|---|---|---|---|
-| B2.1 | Payload inválido | `curl -X POST http://localhost:8000/query -d '{}'` | 422 com detalhe de campo faltando | ✅ |
-| B2.2 | Campo extra rejeitado | `curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d '{"question":"teste","extra":"field"}'` | 422 `extra inputs are not permitted` | ✅ |
-
-### B.3 Verificação Estática
-
-| # | Teste | Comando | Resultado Esperado | Status |
-|---|---|---|---|---|
-| B3.1 | Lint + type check | `poetry run verify` | 0 erros em todos os estágios | ✅ |
-| B3.2 | Testes determinísticos | `poetry run pytest` | Todos passam sem BigQuery/LLM | ✅ |
-
----
-
-## C — Engenharia de Dados (SQL)
-
-### C.1 Queries Retornam Dados Corretos
-
-| # | Teste | Pergunta | O que verificar | Status |
-|---|---|---|---|---|
-| C1.1 | Volume com um canal | `"Usuarios de Facebook entre 2024-01-01 e 2024-03-31"` | Retorna apenas Facebook, user_count > 0 | ✅ |
-| C1.2 | Volume todos os canais | `"Volume de usuarios entre 2024-01-01 e 2024-03-31"` | Retorna múltiplos canais (Search, Organic, Facebook, etc.) | ✅ |
-| C1.3 | Performance com JOIN | `"Receita por canal entre 2024-01-01 e 2024-03-31"` | `total_orders` e `total_revenue` por canal, ordenados | ✅ |
-| C1.4 | Período sem dados | `"Receita de Search ontem"` (se today > 2025) | Resposta tratada (mensagem de "sem dados" ou resultado 0), sem crash | ✅ |
-
-### C.2 Segurança SQL
-
-| # | Verificação | Como validar | Status |
-|---|---|---|---|
-| C2.1 | Parametrização | Código usa `bigquery.ScalarQueryParameter` em todas as queries | ✅ |
-| C2.2 | Sem concatenação | Nenhum f-string com input de usuário na SQL | ✅ |
+| Evidência | Comando | Resultado esperado | Status |
+| --- | --- | --- | --- |
+| Gate estático | `poetry run verify --agent` | `ruff`, `compileall` e `pyright` em `OK` | ✅ |
+| Suite determinística | `poetry run pytest --agent` | Suite local passa sem depender de BigQuery/LLM reais | ✅ |
+| Suite live | `poetry run pytest -m live` | Passa ou faz skip limpo quando ambiente não está configurado | ✅ |
 
 ---
 
-## D — Visão de Produto
+## 2. Requisitos de `case.md`
 
-### D.1 Respostas São Úteis (não despejo técnico)
+### 2.1 Backend e orquestração de IA
 
-| # | Teste | Pergunta | O que avaliar na resposta | Status |
-|---|---|---|---|---|
-| D1.1 | Insight acionável | `"Como foi o volume de usuarios vindos de Search no ultimo mes?"` | Resposta menciona tendência ou sinal, não apenas número bruto | ✅ |
-| D1.2 | Ranking com interpretação | `"Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-03-31? E por que?"` | Ranking + interpretação de negócio, não tabela crua | ✅ |
-| D1.3 | Linguagem de negócio | Qualquer resposta com dados | Em pt-BR, sem SQL exposta, sem jargão técnico | ✅ |
+| Item | O que precisa estar provado | Como validar | Status |
+| --- | --- | --- | --- |
+| Python 3.10+ | Projeto roda na stack pedida | Conferir `pyproject.toml` e ambiente local | ⬜ |
+| FastAPI ou Flask | Superfície HTTP real existe | `poetry run fastapi dev` e `/health` | ⬜ |
+| Orquestrador de IA | Não é prompt único; há orquestração explícita | Conferir `app/graph/workflow.py` | ⬜ |
+| Tool Calling | O agente decide quando chamar ferramenta | Testes A1 e A2 abaixo | ⬜ |
+| Separação prompt vs execução | Prompt, workflow e tools estão separados | Revisão rápida em `app/graph/prompts.py`, `app/graph/workflow.py`, `app/tools/` | ⬜ |
 
-### D.2 Tratamento de Fora de Escopo
+### 2.2 Dados e engenharia
 
-| # | Teste | Pergunta | Resultado Esperado | Status |
-|---|---|---|---|---|
-| D2.1 | Tema totalmente fora | `"Me conta uma piada"` | Recusa educada, sem tool call | ✅ |
-| D2.2 | Métrica não suportada | `"Qual o ROAS de Search ontem?"` | Recusa explicando que ROAS não está no dataset | ✅ |
-| D2.3 | Campanha não suportada | `"Qual campanha deu mais lucro no Facebook ontem?"` | Recusa explicando que campanha/lucro não existe no schema | ✅ |
-| D2.4 | Canal não suportado | `"Trafego de TikTok no ultimo mes"` | Recusa informando canais suportados | ✅ |
-| D2.5 | Sem período | `"Quantos usuarios vieram de Search?"` | Pede esclarecimento de período, não falha silenciosamente | ✅ |
+| Item | O que precisa estar provado | Como validar | Status |
+| --- | --- | --- | --- |
+| BigQuery oficial | Integração usa cliente Python oficial | Conferir `app/clients/bigquery_client.py` | ⬜ |
+| SQL parametrizada | Não há concatenação de input de usuário na query | Revisão rápida em `app/tools/*.py` | ⬜ |
+| JOINs e agregações | `users`, `orders` e `order_items` estão sendo usados corretamente | Perguntas de receita/performance e revisão da tool | ⬜ |
 
-### D.3 Fluxo Conversacional Multi-Turn
+### 2.3 Critérios de avaliação
 
-| # | Teste | Sequência | Resultado Esperado | Status |
-|---|---|---|---|---|
-| D3.1 | Clarificação de data | 1: `"Quantos usuarios vieram de Search?"` → 2: `"nos ultimos 7 dias"` | Turno 2 merge com turno 1 e retorna dados | ✅ |
-| D3.2 | Clarificação de métrica | 1: `"Como foi Search nos ultimos 7 dias?"` (se ambíguo) → 2: `"receita"` ou `"usuarios"` | Turno 2 resolve ambiguidade e retorna dados corretos | ✅ |
-| D3.3 | Follow-up estratégico | 1: Qualquer query com dados → 2: `"O que fazer para melhorar esse canal?"` | Resposta com sugestões baseadas no contexto anterior | ✅ |
-| D3.4 | Follow-up diagnóstico | 1: Query com dados → 2: `"Por que Search ficou abaixo de Organic?"` | Interpretação/hipótese baseada nos dados, não recusa | ✅ |
-
-### D.4 Formatos Temporais
-
-| # | Teste | Pergunta | Resultado Esperado | Status |
-|---|---|---|---|---|
-| D4.1 | ISO | `"Usuarios de Search entre 2024-01-01 e 2024-01-31"` | Dados do período correto | ✅ |
-| D4.2 | BR DD/MM/AAAA | `"Usuarios de Search entre 01/01/2024 e 31/01/2024"` | Mesmo resultado de D4.1 | ✅ |
-| D4.3 | BR DD/MM/AA | `"Usuarios de Search entre 01/01/24 e 31/01/24"` | Mesmo resultado de D4.1 | ✅ |
-| D4.4 | Relativo — ontem | `"Receita de Search ontem"` | Datas resolvidas para ontem | ✅ |
-| D4.5 | Relativo — este mês | `"Volume de trafego este mes"` | start_date = dia 1 do mês atual | ✅ |
-| D4.6 | Relativo — último mês | `"Receita por canal no ultimo mes"` | Período do mês anterior completo | ✅ |
-| D4.7 | Relativo — últimos N dias | `"Usuarios nos ultimos 7 dias"` | 7 dias corridos a partir de hoje | ✅ |
+| Critério | O que precisa ficar claro para o avaliador | Status |
+| --- | --- | --- |
+| Arquitetura do Agente | O fluxo `preprocess -> agent -> tool_executor -> agent` está compreensível e demonstrável | ⬜ |
+| Qualidade do Backend Python | Tipagem, contratos, tratamento de erro e estrutura estão limpos | ⬜ |
+| Engenharia de Dados | Queries fazem sentido para o MVP e retornam dados corretos | ⬜ |
+| Visão de Produto | As respostas ajudam um time de Mídia/Growth, sem despejo técnico | ⬜ |
 
 ---
 
-## E — Entregáveis
+## 3. Gate Automatizado
 
-| # | Verificação | Status |
-|---|---|---|
-| E1 | Repositório está público no GitHub | ✅ |
-| E2 | README.md com instruções de setup (dependências, chaves API, credenciais GCP) | ⬜ |
-| E3 | README.md com diagrama ou explicação da arquitetura | ⬜ |
-| E4 | README.md com explicação das tools criadas e por quê | ⬜ |
-| E5 | `.env.example` com todas as variáveis documentadas | ✅ |
+### 3.1 Verificação local obrigatória
+
+| # | Comando | Resultado esperado | Status |
+| --- | --- | --- | --- |
+| G1 | `poetry run verify --agent` | Tudo `OK` | ✅ |
+| G2 | `poetry run pytest --agent` | Suite determinística passa | ✅ |
+| G3 | `poetry run analyst-chat --help` | CLI sobe e mostra ajuda | ✅ |
+
+### 3.2 Verificação live antes da entrega
+
+> Rodar somente com `GOOGLE_APPLICATION_CREDENTIALS` e chave de provider configuradas.
+
+| # | Comando | Resultado esperado | Status |
+| --- | --- | --- | --- |
+| L1 | `poetry run pytest -m live` | Live smoke passa ou faz skip limpo por ambiente | ✅ |
+| L2 | `poetry run pytest --run-live --agent` | Suite local + live sem surpresas | ⬜ |
 
 ---
 
-## Resumo de Prioridade
+## 4. Checklist Manual da Superfície de Produto
 
-| Prioridade | Item | Impacto |
-|---|---|---|
-| 🔴 P0 | E2, E3, E4 — README completo | Critério de entregável obrigatório |
-| 🔴 P0 | E1 — Repo público | Não entregável sem isso |
-| 🟡 P1 | A1.1-A1.4 — Tool calling funciona end-to-end | Critério de peso Alto |
-| 🟡 P1 | D1.1-D1.3 — Respostas são úteis e insight-driven | Critério de peso Alto |
-| 🟡 P1 | D2.1-D2.5 — Fora de escopo bem tratado | Critério de peso Alto |
-| 🟢 P2 | D3.1-D3.4 — Multi-turn conversacional | Diferencial |
-| 🟢 P2 | D4.1-D4.7 — Formatos temporais | Robustez |
+### 4.1 API e CLI
+
+> Suba a API com `poetry run fastapi dev`.
+>
+> Use a CLI com `poetry run analyst-chat --debug`.
+
+| # | Teste | Ação | Resultado esperado | Prioridade | Status |
+| --- | --- | --- | --- | --- | --- |
+| S1 | Health check | `curl http://127.0.0.1:8000/health` | `status=ok` | P0 | ✅ |
+| S2 | Query HTTP válida | POST `/query` com pergunta de receita | `200`, `answer`, `tools_used`, `metadata` | P0 | ✅ |
+| S3 | Payload inválido | POST `/query` com `question=""` | `422` | P0 | ⬜ |
+| S4 | `X-Debug` | Repetir S2 com `X-Debug: true` | `metadata.debug` preenchido | P1 | ✅ |
+| S5 | CLI conversa com API | Abrir `analyst-chat` e enviar uma pergunta simples | Resposta renderizada sem stack trace | P0 | ✅ |
+| S6 | `thread_id` | Fazer 2 turnos no mesmo thread | `context_message_count` cresce | P1 | ✅ |
+
+### 4.2 Tool Calling e consultas com dados
+
+| # | Cenário | Pergunta | Resultado esperado | Prioridade | Status |
+| --- | --- | --- | --- | --- | --- |
+| T1 | Volume por canal | `Como foi o volume de usuarios vindos de Search no ultimo mes?` | `traffic_volume_analyzer` | P0 | ✅ |
+| T2 | Receita por canal | `Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?` | `channel_performance_analyzer` | P0 | ✅ |
+| T3 | Ranking geral | `Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-01-31?` | tool financeira com `traffic_source` nulo | P0 | ✅ |
+| T4 | Comparação entre canais | `Compare Search e Organic entre 2024-01-01 e 2024-01-31.` | comparação útil em linguagem natural | P0 | ⬜ |
+
+### 4.3 Clarificações e ambiguidade
+
+| # | Cenário | Sequência | Resultado esperado | Prioridade | Status |
+| --- | --- | --- | --- | --- | --- |
+| C1 | Falta de período | `Qual foi a receita de Search?` | pede período, não quebra | P0 | ✅ |
+| C2 | Follow-up de período | `Qual foi a receita de Search?` → `Entre 2024-01-01 e 2024-01-31.` | merge correto e execução da tool | P0 | ✅ |
+| C3 | Métrica ambígua | `Como o Search performou ontem?` | agente pede clarificação entre volume e performance financeira | P0 | ✅ |
+| C4 | Resposta à ambiguidade | `Como o Search performou ontem?` → `volume de usuarios` | preserva `ontem` e chama `traffic_volume_analyzer` | P0 | ✅ |
+| C5 | Resposta à ambiguidade | `Como o Search performou ontem?` → `receita` | preserva `ontem` e chama `channel_performance_analyzer` | P0 | ✅ |
+
+### 4.4 Follow-ups com contexto
+
+| # | Cenário | Sequência | Resultado esperado | Prioridade | Status |
+| --- | --- | --- | --- | --- | --- |
+| F1 | Diagnóstico | `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?` → `O que explica essa concentracao?` | não cai em `out_of_scope`; responde com leitura diagnóstica | P0 | ✅ |
+| F2 | Estratégia | `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?` → `Quais acoes devemos priorizar agora?` | não cai em `out_of_scope`; responde com leitura estratégica | P0 | ✅ |
+| F3 | Follow-up adicional | após F1 ou F2, fazer mais 1-2 perguntas naturais | continuidade consistente no mesmo thread | P1 | ✅ |
+
+### 4.5 Fora de escopo e guardrails
+
+| # | Cenário | Pergunta | Resultado esperado | Prioridade | Status |
+| --- | --- | --- | --- | --- | --- |
+| O1 | Fora de escopo puro | `Me conta uma piada` | recusa curta e educada, sem tool call | P0 | ✅ |
+| O2 | Métrica ausente | `Qual foi o ROAS de Search ontem?` | recusa coerente com schema | P0 | ✅ |
+| O3 | Dimensão ausente | `Qual campanha deu mais lucro no Facebook ontem?` | recusa coerente com schema | P0 | ✅ |
+| O4 | Data inválida | `Qual foi a receita de Search em 31/02/2026?` | clarificação por data inválida | P0 | ⬜ |
+| O5 | Intervalo invertido | `Qual foi a receita de Search entre 2024-02-10 e 2024-01-10?` | clarificação por data inválida/invertida | P1 | ⬜ |
+
+### 4.6 Formatos temporais
+
+| # | Cenário | Pergunta | Resultado esperado | Prioridade | Status |
+| --- | --- | --- | --- | --- | --- |
+| D1 | ISO | `Usuarios de Search entre 2024-01-01 e 2024-01-31` | datas corretas | P1 | ⬜ |
+| D2 | BR longa | `Usuarios de Search entre 01/01/2024 e 31/01/2024` | datas corretas | P1 | ⬜ |
+| D3 | BR curta | `Usuarios de Search entre 01/01/24 e 31/01/24` | datas corretas | P1 | ⬜ |
+| D4 | Relativo ontem | `Receita de Search ontem` | resolve para um dia | P1 | ⬜ |
+| D5 | Este mês | `Volume de trafego este mes` | resolve início do mês atual | P1 | ⬜ |
+| D6 | Último mês | `Receita por canal no ultimo mes` | resolve mês anterior completo | P1 | ⬜ |
+| D7 | Últimos N dias | `Usuarios nos ultimos 7 dias` | resolve janela correta | P1 | ⬜ |
+
+---
+
+## 5. Qualidade da Resposta Final
+
+> Avaliar não só se “retornou algo”, mas se a resposta ajuda um gerente de Mídia/Growth.
+
+| # | Critério | O que observar | Prioridade | Status |
+| --- | --- | --- | --- | --- |
+| R1 | Linguagem | Resposta em pt-BR, sem SQL exposta | P0 | ✅ |
+| R2 | Utilidade | Há insight acionável, não só despejo de números | P0 | ✅ |
+| R3 | Coerência | Não inventa métricas, canais, campanhas ou causalidade | P0 | ✅ |
+| R4 | Leitura de negócio | Traz implicação para Growth/Mídia | P0 | ✅ |
+| R5 | Follow-up | Quando não sabe a causa, explicita hipótese vs observação | P1 | ⬜ |
+
+---
+
+## 6. Dados e SQL
+
+| # | Verificação | Como validar | Prioridade | Status |
+| --- | --- | --- | --- | --- |
+| Q1 | `traffic_volume_analyzer` consulta `users` corretamente | revisão de código + teste T1 | P0 | ⬜ |
+| Q2 | `channel_performance_analyzer` faz JOIN entre `users`, `orders` e `order_items` | revisão de código + teste T2/T3 | P0 | ⬜ |
+| Q3 | SQL parametrizada | revisar uso de parâmetros na construção das queries | P0 | ⬜ |
+| Q4 | Sem concatenação de input na SQL | revisão de código | P0 | ⬜ |
+| Q5 | Ferramentas reais no BigQuery | `pytest -m live` ou smoke manual com credenciais | P1 | ⬜ |
+
+---
+
+## 7. Entregáveis Finais
+
+| # | Item | O que precisa ser checado | Prioridade | Status |
+| --- | --- | --- | --- | --- |
+| E1 | GitHub público | repositório acessível publicamente | P0 | ⬜ |
+| E2 | README setup | dependências, `poetry`, credenciais GCP e chaves de LLM | P0 | ⬜ |
+| E3 | README arquitetura | explicação clara do agente e das tools | P0 | ⬜ |
+| E4 | README execução | como subir API, usar CLI e rodar testes | P0 | ⬜ |
+| E5 | `.env.example` | variáveis mínimas documentadas | P1 | ⬜ |
+| E6 | Evidência live | se possível, incluir checkpoint final com ambiente real | P1 | ⬜ |
+
+---
+
+## 8. Decisão Final
+
+### 8.1 Go / No-Go
+
+| Resultado | Critério |
+| --- | --- |
+| GO | Todos os itens `P0` em `✅` |
+| GO com ressalva | Todos os `P0` em `✅` e apenas itens `P1` restantes que não bloqueiem a demo |
+| NO-GO | Qualquer item `P0` em `⚠️` ou `❌` |
+
+### 8.2 Registro final da entrega
+
+Preencher no momento do fechamento:
+
+| Campo | Valor |
+| --- | --- |
+| Data da validação final | ⬜ |
+| `poetry run verify --agent` | ⬜ |
+| `poetry run pytest --agent` | ⬜ |
+| `poetry run pytest -m live` | ⬜ |
+| README final revisado | ⬜ |
+| Repo público conferido | ⬜ |
+| Status final | ⬜ |
+| Observações finais | ⬜ |
