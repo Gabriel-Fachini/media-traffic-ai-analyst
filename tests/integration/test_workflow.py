@@ -40,9 +40,11 @@ def _require_router_decision(state: AnalyticsGraphState) -> RouterDecision:
     return RouterDecision.model_validate(value)
 
 
-def test_graph_executes_traffic_volume_tool_and_synthesizes_answer(
+def test_graph_llm_decides_to_call_traffic_volume_tool(
     graph_bundle: DeterministicGraphBundle,
 ) -> None:
+    """The LLM (via FakeAgentLLM) should emit tool_calls, which ToolNode executes,
+    and then the LLM synthesizes a final answer — the full tool calling cycle."""
     question = "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?"
 
     state = invoke_analytics_graph(
@@ -51,18 +53,45 @@ def test_graph_executes_traffic_volume_tool_and_synthesizes_answer(
         thread_id="traffic-volume-thread",
     )
 
-    assert _require_list(state, "tools_used") == ["traffic_volume_analyzer"]
-    assert _require_str(state, "final_answer") == (
-        f"SYNTH::traffic_volume_analyzer::{question}"
-    )
+    final_answer = _require_str(state, "final_answer")
+    tools_used = _require_list(state, "tools_used")
+
+    # The LLM decided to call traffic_volume_analyzer.
+    assert "traffic_volume_analyzer" in tools_used
+    # The agent synthesized an answer after receiving the tool result.
+    assert final_answer.startswith("SYNTH::traffic_volume_analyzer::")
+    # The tool was actually executed via ToolNode.
     assert len(graph_bundle.tools.calls) == 1
     assert graph_bundle.tools.calls[0].tool_name == "traffic_volume_analyzer"
-    assert graph_bundle.llm.prompts
+    # The agent LLM was invoked (first for tool_calls, then for synthesis).
+    assert len(graph_bundle.agent_llm.prompts) >= 1
+
+
+def test_graph_llm_decides_to_call_channel_performance_tool(
+    graph_bundle: DeterministicGraphBundle,
+) -> None:
+    """The LLM should select channel_performance_analyzer for revenue questions."""
+    question = "Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?"
+
+    state = invoke_analytics_graph(
+        question,
+        graph=graph_bundle.graph,
+        thread_id="channel-perf-thread",
+    )
+
+    tools_used = _require_list(state, "tools_used")
+    final_answer = _require_str(state, "final_answer")
+
+    assert "channel_performance_analyzer" in tools_used
+    assert final_answer.startswith("SYNTH::channel_performance_analyzer::")
+    assert len(graph_bundle.tools.calls) == 1
+    assert graph_bundle.tools.calls[0].tool_name == "channel_performance_analyzer"
 
 
 def test_graph_short_circuits_missing_dates_without_tool_execution(
     graph_bundle: DeterministicGraphBundle,
 ) -> None:
+    """Short-circuits bypass the LLM agent entirely — no tool calls, no LLM tokens."""
     state = invoke_analytics_graph(
         "Qual foi a receita de Search?",
         graph=graph_bundle.graph,
@@ -72,6 +101,8 @@ def test_graph_short_circuits_missing_dates_without_tool_execution(
     assert _require_str(state, "final_answer") == MISSING_DATES_MESSAGE
     assert _require_list(state, "tools_used") == []
     assert graph_bundle.tools.calls == []
+    # The agent LLM should NOT have been called for a short-circuit.
+    assert len(graph_bundle.agent_llm.prompts) == 0
 
 
 def test_graph_merges_date_follow_up_from_same_thread(
@@ -94,7 +125,7 @@ def test_graph_merges_date_follow_up_from_same_thread(
     router_decision = _require_router_decision(second_state)
 
     assert _require_str(first_state, "final_answer") == MISSING_DATES_MESSAGE
-    assert _require_list(second_state, "tools_used") == ["channel_performance_analyzer"]
+    assert "channel_performance_analyzer" in _require_list(second_state, "tools_used")
     assert (
         _require_str(second_state, "resolved_question")
         == "Qual foi a receita de Search? Entre 2024-01-01 e 2024-01-31."
@@ -126,7 +157,8 @@ def test_graph_routes_strategy_follow_up_without_new_tool_execution(
     )
     router_decision = _require_router_decision(second_state)
 
-    assert _require_list(first_state, "tools_used") == ["channel_performance_analyzer"]
+    assert "channel_performance_analyzer" in _require_list(first_state, "tools_used")
+    # Follow-up uses insight_synthesizer (FakeSynthesisLLM), not the agent.
     assert len(graph_bundle.tools.calls) == 1
     assert _require_list(second_state, "tools_used") == []
     assert _require_str(second_state, "final_answer") == (

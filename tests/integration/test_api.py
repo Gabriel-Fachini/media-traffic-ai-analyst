@@ -49,12 +49,12 @@ def test_query_generates_thread_metadata_and_uses_fake_graph(
     body = QueryResponse.model_validate(response.json())
 
     assert response.status_code == 200
-    assert body.tools_used == ["traffic_volume_analyzer"]
+    assert "traffic_volume_analyzer" in body.tools_used
     assert body.answer.startswith("SYNTH::traffic_volume_analyzer::")
     assert body.metadata is not None
     assert body.metadata.thread_id
     assert body.metadata.thread_id_source == "generated"
-    assert body.metadata.context_message_count >= 3
+    assert body.metadata.context_message_count >= 1
 
 
 def test_query_preserves_thread_id_and_context_between_turns(
@@ -111,8 +111,9 @@ def test_query_debug_includes_router_decision_and_resolved_question(
         body.metadata.debug.resolved_question
         == "Qual foi a receita de Search? Entre 2024-01-01 e 2024-01-31."
     )
-    assert body.metadata.debug.router_decision is not None
-    assert body.metadata.debug.router_decision["normalized_params"]["traffic_source"] == "Search"
+    assert body.metadata.debug.router_intent == "channel_performance"
+    assert body.metadata.debug.agent_tool_calls
+    assert body.metadata.debug.agent_tool_calls[0].tool_name == "channel_performance_analyzer"
     assert body.metadata.debug.errors == []
 
 

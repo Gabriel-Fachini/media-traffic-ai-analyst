@@ -12,6 +12,7 @@ from app.graph import AnalyticsGraphState, invoke_analytics_graph
 from app.graph.llm import LlmTimeoutError
 from app.graph.workflow import get_persistent_analytics_graph
 from app.schemas import (
+    AgentToolCall,
     DebugError,
     DebugInfo,
     ErrorResponse,
@@ -19,6 +20,7 @@ from app.schemas import (
     QueryRequest,
     QueryResponse,
 )
+from app.schemas.router import RouterDecision
 from app.utils.config import Settings, get_settings
 
 app = FastAPI(title="Media Traffic AI Analyst")
@@ -59,6 +61,29 @@ DebugHeader = Annotated[
 ]
 
 
+def _extract_agent_tool_calls(state: AnalyticsGraphState) -> list[AgentToolCall]:
+    """Extract all tool_calls emitted by the LLM agent in the current state."""
+    from langchain_core.messages import AIMessage
+
+    calls: list[AgentToolCall] = []
+    seen: set[str] = set()
+    for message in state.get("messages", []):
+        if not isinstance(message, AIMessage) or not message.tool_calls:
+            continue
+        for tc in message.tool_calls:
+            key = f"{tc['name']}:{tc.get('id', '')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            calls.append(
+                AgentToolCall(
+                    tool_name=tc["name"],
+                    args={k: str(v) for k, v in tc.get("args", {}).items()},
+                )
+            )
+    return calls
+
+
 def _build_debug_info_from_state(state: AnalyticsGraphState) -> DebugInfo | None:
     raw_errors = state.get("debug_errors", [])
     errors: list[DebugError] = []
@@ -70,14 +95,37 @@ def _build_debug_info_from_state(state: AnalyticsGraphState) -> DebugInfo | None
             continue
 
     resolved_question = state.get("resolved_question") or None
-    router_decision = state.get("router_decision")
 
-    if not errors and resolved_question is None and router_decision is None:
+    # Extract only routing signals from router_decision (not tool args).
+    router_intent: str | None = None
+    router_short_circuit: str | None = None
+    raw_router = state.get("router_decision")
+    if raw_router:
+        try:
+            rd = RouterDecision.model_validate(raw_router)
+            router_intent = rd.intent
+            if rd.refusal_reason:
+                router_short_circuit = f"refusal:{rd.refusal_reason}"
+            elif rd.clarification_reason:
+                router_short_circuit = f"clarification:{rd.clarification_reason}"
+        except Exception:
+            pass
+
+    agent_tool_calls = _extract_agent_tool_calls(state)
+
+    if (
+        not errors
+        and resolved_question is None
+        and router_intent is None
+        and not agent_tool_calls
+    ):
         return None
 
     return DebugInfo(
         resolved_question=resolved_question,
-        router_decision=router_decision,
+        router_intent=router_intent,
+        router_short_circuit=router_short_circuit,
+        agent_tool_calls=agent_tool_calls,
         errors=errors,
     )
 

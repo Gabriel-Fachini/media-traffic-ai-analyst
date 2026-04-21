@@ -123,17 +123,31 @@ def _format_debug_error(debug_error: DebugError) -> str:
     return " ".join(details)
 
 
+def _format_agent_tool_call(index: int, call: Any) -> str:
+    args_lines = "\n".join(
+        f"    {k}: {v}" for k, v in (call.args or {}).items()
+    )
+    return f"  [{index + 1}] {call.tool_name}\n{args_lines}" if args_lines else f"  [{index + 1}] {call.tool_name}"
+
+
 def _format_debug_info(debug_info: DebugInfo) -> str:
     blocks: list[str] = []
 
     if debug_info.resolved_question:
         blocks.append(f"resolved_question:\n{debug_info.resolved_question}")
 
-    if debug_info.router_decision is not None:
-        blocks.append(
-            "router_decision:\n"
-            f"{_format_json(debug_info.router_decision)}"
+    if debug_info.router_intent:
+        intent_line = f"router_intent: {debug_info.router_intent}"
+        if debug_info.router_short_circuit:
+            intent_line += f"  →  short-circuit: {debug_info.router_short_circuit}"
+        blocks.append(intent_line)
+
+    if debug_info.agent_tool_calls:
+        calls_lines = "\n".join(
+            _format_agent_tool_call(i, call)
+            for i, call in enumerate(debug_info.agent_tool_calls)
         )
+        blocks.append(f"agent_tool_calls (LLM decidiu):\n{calls_lines}")
 
     if debug_info.errors:
         blocks.append(
