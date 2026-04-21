@@ -41,6 +41,7 @@ markers = [
 	"unit: deterministic unit tests for pure business logic and contracts",
 	"integration: deterministic integration tests for workflow and API behavior",
 	"live: opt-in tests that use real BigQuery and/or LLM providers",
+	"readiness: curated readiness checks for the highest-priority delivery scenarios",
 ]
 addopts = ["--strict-markers", "-ra"]
 
