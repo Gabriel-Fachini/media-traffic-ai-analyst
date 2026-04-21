@@ -345,6 +345,14 @@ UNSUPPORTED_METRIC_TOKENS = frozenset(
         "cliques",
         "click",
         "clicks",
+        "empresa",
+        "empresas",
+        "company",
+        "companies",
+    }
+)
+UNSUPPORTED_DIMENSION_TOKENS = frozenset(
+    {
         "campanha",
         "campanhas",
         "campaign",
@@ -357,10 +365,6 @@ UNSUPPORTED_METRIC_TOKENS = frozenset(
         "criativos",
         "creative",
         "creatives",
-        "empresa",
-        "empresas",
-        "company",
-        "companies",
     }
 )
 SOURCE_ALIASES = {
@@ -668,6 +672,10 @@ def _extract_unknown_traffic_source(question: str) -> str | None:
 
 
 def _question_requests_unsupported_dimension(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if question_tokens & UNSUPPORTED_DIMENSION_TOKENS:
+        return True
+
     requested_dimensions = _extract_requested_dimensions(question)
     if not requested_dimensions:
         return False
@@ -864,24 +872,22 @@ def _resolve_router_intent(question: str) -> Literal[
     if _question_is_supported_channel_comparison(question):
         return "channel_performance"
 
-    if question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS:
+    has_volume_signal = bool(
+        question_tokens
+        & (
+            SUPPORTED_VOLUME_SIGNAL_TOKENS
+            | SUPPORTED_USER_METRIC_TOKENS
+        )
+    )
+    has_performance_signal = bool(question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS)
+
+    if has_performance_signal:
         return "channel_performance"
 
-    if _question_is_aggregate_user_volume_query(question):
+    if has_volume_signal and not has_performance_signal:
         return "traffic_volume"
 
-    if _question_supports_date_clarification(question):
-        return "traffic_volume"
-
-    has_temporal_signal = question_contains_temporal_signal(question)
-    has_supported_context = _question_has_supported_context(question)
-    has_ambiguous_hint = bool(question_tokens & AMBIGUOUS_ANALYTICS_HINT_TOKENS)
-    has_source_or_channel_context = bool(
-        question_tokens & (SUPPORTED_CHANNEL_TOKENS | SUPPORTED_SOURCE_TOKENS)
-    )
-    if has_supported_context and (
-        has_ambiguous_hint or (has_source_or_channel_context and has_temporal_signal)
-    ):
+    if _question_has_supported_context(question):
         return "ambiguous_analytics"
 
     return "out_of_scope"
@@ -1020,17 +1026,6 @@ def build_router_decision(
             response_message=UNSUPPORTED_METRIC_MESSAGE,
         )
 
-    unknown_traffic_source = _extract_unknown_traffic_source(question)
-    if unknown_traffic_source is not None:
-        return RouterDecision(
-            intent="out_of_scope",
-            normalized_params=normalized_params,
-            refusal_reason="unsupported_traffic_source",
-            response_message=_build_unsupported_traffic_source_message(
-                unknown_traffic_source
-            ),
-        )
-
     valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
     _, invalid_relative_tokens = _extract_relative_date_range(
         question,
@@ -1061,17 +1056,6 @@ def build_router_decision(
             needs_clarification=True,
             clarification_reason="invalid_dates",
             response_message=INVALID_DATES_MESSAGE,
-        )
-
-    if intent == "ambiguous_analytics":
-        return RouterDecision(
-            intent="ambiguous_analytics",
-            normalized_params=normalized_params,
-            needs_clarification=True,
-            clarification_reason="ambiguous_metric",
-            response_message=_build_guided_metric_clarification_message(
-                normalized_params
-            ),
         )
 
     if intent == "out_of_scope":

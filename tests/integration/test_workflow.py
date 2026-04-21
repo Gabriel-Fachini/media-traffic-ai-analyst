@@ -197,7 +197,6 @@ def test_graph_routes_strategy_follow_up_without_new_tool_execution(
     router_decision = _require_router_decision(second_state)
 
     assert "channel_performance_analyzer" in _require_list(first_state, "tools_used")
-    # Follow-up uses insight_synthesizer (FakeSynthesisLLM), not the agent.
     assert len(graph_bundle.tools.calls) == 1
     assert _require_list(second_state, "tools_used") == []
     assert _require_str(second_state, "final_answer") == (
@@ -536,8 +535,6 @@ def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     assert router_decision.refusal_reason is None
 
 
-<<<<<<< Updated upstream
-=======
 def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clarification() -> None:
     graph_bundle = build_deterministic_graph_bundle()
     thread_id = "ambiguous-analytics-clarification-thread"
@@ -566,7 +563,6 @@ def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clari
     assert router_decision.normalized_params.traffic_source == "Search"
     assert router_decision.normalized_params.start_date is not None
     assert router_decision.normalized_params.end_date is not None
-
 
 def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> None:
     clarifying_agent_llm = ParaphrasedAmbiguousMetricClarifyingAgentLLM()
@@ -603,9 +599,6 @@ def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> N
     assert router_decision.normalized_params.traffic_source == "Search"
     assert router_decision.normalized_params.start_date is not None
     assert router_decision.normalized_params.end_date is not None
-
-
->>>>>>> Stashed changes
 def test_graph_resets_final_answer_between_short_circuits(
     graph_bundle: DeterministicGraphBundle,
 ) -> None:

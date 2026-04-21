@@ -16,13 +16,12 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
 from app.graph.llm import (
     LlmTimeoutError,
-    build_analytics_llm,
     build_tool_enabled_llm,
     is_llm_timeout_error,
 )
@@ -66,6 +65,10 @@ AGENT_SCOPE_CLARIFICATION_PATTERN = re.compile(
 )
 AGENT_MONTH_SCOPE_CLARIFICATION_PATTERN = re.compile(
     r"este mes ate hoje.*mes calendario completo|mes calendario completo.*este mes ate hoje",
+    re.IGNORECASE,
+)
+AGENT_AMBIGUOUS_METRIC_CLARIFICATION_PATTERN = re.compile(
+    r"volume de usuarios.*performance financeira|performance financeira.*volume de usuarios",
     re.IGNORECASE,
 )
 
@@ -342,8 +345,6 @@ def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
     return "\n\n".join(context_blocks)
 
 
-<<<<<<< Updated upstream
-=======
 def _previous_turn_opened_ambiguous_metric_clarification(
     state: AnalyticsGraphState,
 ) -> bool:
@@ -360,7 +361,6 @@ def _previous_turn_opened_ambiguous_metric_clarification(
         return False
 
     return bool(_get_last_prior_ai_answer(state))
-
 
 def _build_follow_up_system_messages(
     state: AnalyticsGraphState,
@@ -394,9 +394,6 @@ def _build_follow_up_system_messages(
             )
         ),
     ]
-
-
->>>>>>> Stashed changes
 def _infer_follow_up_intent_from_previous_context(
     *,
     previous_router_decision: RouterDecision | None,
@@ -443,6 +440,65 @@ def _infer_follow_up_intent_from_previous_context(
     return None
 
 
+def _question_has_soft_strategy_signal(question: str) -> bool:
+    normalized_question = _normalize_loose_text(question)
+    if not normalized_question:
+        return False
+    if any(
+        token in normalized_question
+        for token in ("empresa", "empresas", "company", "companies")
+    ):
+        return False
+    return any(
+        cue in normalized_question
+        for cue in (
+            "acoes",
+            "acao",
+            "priorizar",
+            "prioridade",
+            "plano",
+            "recomend",
+            "sugest",
+            "proximo passo",
+            "proximos passos",
+            "melhorar",
+            "fortalecer",
+        )
+    )
+
+
+def _question_has_soft_diagnostic_signal(question: str) -> bool:
+    normalized_question = _normalize_loose_text(question)
+    if not normalized_question:
+        return False
+    if any(
+        token in normalized_question
+        for token in ("empresa", "empresas", "company", "companies")
+    ):
+        return False
+    return any(
+        cue in normalized_question
+        for cue in (
+            "por que",
+            "porque",
+            "o que explica",
+            "como explicar",
+            "qual a explicacao",
+            "explica",
+            "explicar",
+            "explicacao",
+            "causa",
+            "causas",
+            "motivo",
+            "motivos",
+            "hipotese",
+            "hipoteses",
+            "diagnostico",
+            "diagnostica",
+        )
+    )
+
+
 def _resolve_follow_up_intent(
     question: str,
     *,
@@ -470,6 +526,17 @@ def _resolve_follow_up_intent(
         if inferred_intent is not None:
             return inferred_intent
         return "strategy_follow_up"
+
+    # Once there is valid prior analytics context in the same thread, allow the
+    # agent to handle short strategic/diagnostic follow-ups even when the new
+    # user turn no longer repeats explicit analytics anchors.
+    normalized_question = _normalize_loose_text(question)
+    question_tokens = normalized_question.split()
+    if len(question_tokens) <= 12:
+        if _question_has_soft_diagnostic_signal(normalized_question):
+            return "diagnostic_follow_up"
+        if _question_has_soft_strategy_signal(normalized_question):
+            return "strategy_follow_up"
 
     return None
 
@@ -528,6 +595,15 @@ def _build_router_guidance_message(
             "- o router ja resolveu a intencao e os parametros necessarios; nao peca nova clarificacao sobre periodo, metrica ou comparacao por canal"
         )
 
+    if (
+        not router_decision.needs_clarification
+        and router_decision.refusal_reason is None
+        and router_decision.intent == "ambiguous_analytics"
+    ):
+        guidance_lines.append(
+            "- a pergunta esta no dominio, mas ainda esta ambigua entre volume de usuarios e performance financeira; antes de qualquer tool_call, peca uma clarificacao curta e objetiva"
+        )
+
     return "\n".join(guidance_lines)
 
 
@@ -577,8 +653,6 @@ def _build_agent_clarification_follow_up_question(
         }:
             return _merge_follow_up_with_previous_question(state, question)
 
-<<<<<<< Updated upstream
-=======
     if normalized_question in {
         "volume",
         "volume de usuarios",
@@ -597,8 +671,6 @@ def _build_agent_clarification_follow_up_question(
         or _previous_turn_opened_ambiguous_metric_clarification(state)
     ):
         return _merge_follow_up_with_previous_question(state, question)
-
->>>>>>> Stashed changes
     return None
 
 
@@ -750,15 +822,14 @@ def build_analytics_graph(
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
     # agent_llm: LLM with tools bound — drives tool calling decisions.
-    # response_llm: plain LLM (no tools) — used only for follow-up synthesis.
+    # response_llm is retained for API compatibility during the workflow transition.
     resolved_agent_llm = agent_llm or build_tool_enabled_llm(settings)
-    resolved_response_llm = response_llm or build_analytics_llm(settings)
     tools_by_name: dict[str, BaseTool] = {tool.name: tool for tool in analytics_tools}
     agent_system_prompt = build_conversation_system_prompt()
 
-    def router_node(
+    def preprocess_node(
         state: AnalyticsGraphState,
-    ) -> Command[Literal["agent", "scope_guard", "insight_synthesizer"]]:
+    ) -> Command[Literal["agent", "__end__"]]:
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
         injected_messages = _build_turn_question_messages(state)
@@ -774,21 +845,15 @@ def build_analytics_graph(
         if injected_messages:
             state_update["messages"] = injected_messages
 
-        # Follow-ups (strategy/diagnostic) go straight to synthesis, no new tool calls.
-        if router_decision.intent in {
-            "strategy_follow_up",
-            "diagnostic_follow_up",
-        }:
-            return Command(update=state_update, goto="insight_synthesizer")
-
-        # Short-circuits (refusal, clarification) bypass LLM entirely.
+        # Structural short-circuits still end the turn before the agent.
         if _router_decision_short_circuits(router_decision):
             state_update["final_answer"] = (
                 router_decision.response_message or EMPTY_QUESTION_MESSAGE
             )
-            return Command(update=state_update, goto="scope_guard")
+            state_update["tools_used"] = []
+            return Command(update=state_update, goto="__end__")
 
-        # Analytics intents (traffic_volume, channel_performance) go to the LLM agent.
+        # Everything else flows through the tool-enabled agent.
         return Command(update=state_update, goto="agent")
 
     def agent_node(
@@ -843,6 +908,7 @@ def build_analytics_graph(
         )
         if router_guidance is not None:
             llm_input.append(SystemMessage(content=router_guidance))
+        llm_input.extend(_build_follow_up_system_messages(state, router_decision))
         llm_input += agent_turn_messages
 
         try:
@@ -895,86 +961,6 @@ def build_analytics_graph(
             goto="__end__",
         )
 
-    def scope_guard_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        """Emits the short-circuit answer set by the router. No LLM involved."""
-        preset_answer = state.get("final_answer", "")
-        return {
-            "final_answer": preset_answer,
-            "tools_used": [],
-        }
-
-    def insight_synthesizer_node(state: AnalyticsGraphState) -> dict[str, Any]:
-        """Synthesizes strategic/diagnostic follow-up answers using a plain LLM."""
-        current_turn_messages = _get_current_turn_messages(state)
-        router_decision = _deserialize_router_decision(state.get("router_decision"))
-        tools_used = _collect_tools_used(current_turn_messages)
-
-        if router_decision is not None and router_decision.intent in {
-            "strategy_follow_up",
-            "diagnostic_follow_up",
-        }:
-            question = _resolve_effective_question(state)
-            strategy_context = _build_strategy_follow_up_context(state)
-            if strategy_context is None:
-                return {
-                    "final_answer": OUT_OF_SCOPE_MESSAGE,
-                    "tools_used": tools_used,
-                }
-
-            try:
-                synthesized_response = cast(
-                    AIMessage,
-                    resolved_response_llm.invoke(
-                        [
-                            SystemMessage(
-                                content=(
-                                    STRATEGY_FOLLOW_UP_SYSTEM_PROMPT
-                                    if router_decision.intent == "strategy_follow_up"
-                                    else DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT
-                                )
-                            ),
-                            HumanMessage(
-                                content=(
-                                    f"Pergunta de follow-up:\n{question}\n\n"
-                                    f"Contexto analitico anterior:\n{strategy_context}"
-                                )
-                            ),
-                        ]
-                    ),
-                )
-            except Exception as exc:
-                if is_llm_timeout_error(exc):
-                    raise LlmTimeoutError(
-                        "Tempo limite excedido ao sintetizar o follow-up contextual.",
-                        source="insight_synthesizer",
-                        error_type=type(exc).__name__,
-                        debug_message=_stringify_exception(exc),
-                    ) from exc
-                return {
-                    "messages": [_build_temporary_failure_ai_message()],
-                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-                    "tools_used": tools_used,
-                    "debug_errors": [
-                        _build_debug_error(
-                            "insight_synthesizer",
-                            message=_stringify_exception(exc),
-                            error_type=type(exc).__name__,
-                        )
-                    ],
-                }
-
-            return {
-                "messages": [synthesized_response],
-                "final_answer": _content_to_text(synthesized_response.content).strip(),
-                "tools_used": tools_used,
-            }
-
-        return {
-            "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-            "tools_used": tools_used,
-        }
-
-    graph = StateGraph(AnalyticsGraphState)
     def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
         """Execute all tool_calls from the last AIMessage and return ToolMessages."""
         messages = list(state.get("messages", []))
@@ -1066,17 +1052,13 @@ def build_analytics_graph(
         return result_state
 
     graph = StateGraph(AnalyticsGraphState)
-    graph.add_node("router", router_node)
+    graph.add_node("preprocess", preprocess_node)
     graph.add_node("agent", agent_node)
     graph.add_node("tool_executor", tool_executor_node)
-    graph.add_node("scope_guard", scope_guard_node)
-    graph.add_node("insight_synthesizer", insight_synthesizer_node)
 
-    graph.add_edge(START, "router")
+    graph.add_edge(START, "preprocess")
     # tool_executor loops back to agent after executing the tool call.
     graph.add_edge("tool_executor", "agent")
-    graph.add_edge("scope_guard", END)
-    graph.add_edge("insight_synthesizer", END)
 
     return graph.compile(checkpointer=checkpointer)
 
