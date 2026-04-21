@@ -71,8 +71,8 @@
 |---|---|---|---|---|
 | C1.1 | Volume com um canal | `"Usuarios de Facebook entre 2024-01-01 e 2024-03-31"` | Retorna apenas Facebook, user_count > 0 | ✅ |
 | C1.2 | Volume todos os canais | `"Volume de usuarios entre 2024-01-01 e 2024-03-31"` | Retorna múltiplos canais (Search, Organic, Facebook, etc.) | ✅ |
-| C1.3 | Performance com JOIN | `"Receita por canal entre 2024-01-01 e 2024-03-31"` | `total_orders` e `total_revenue` por canal, ordenados | ❌ |
-| C1.4 | Período sem dados | `"Receita de Search ontem"` (se today > 2025) | Resposta tratada (mensagem de "sem dados" ou resultado 0), sem crash | ❌ |
+| C1.3 | Performance com JOIN | `"Receita por canal entre 2024-01-01 e 2024-03-31"` | `total_orders` e `total_revenue` por canal, ordenados | ✅ |
+| C1.4 | Período sem dados | `"Receita de Search ontem"` (se today > 2025) | Resposta tratada (mensagem de "sem dados" ou resultado 0), sem crash | ✅ |
 
 ### C.2 Segurança SQL
 
@@ -89,17 +89,17 @@
 
 | # | Teste | Pergunta | O que avaliar na resposta | Status |
 |---|---|---|---|---|
-| D1.1 | Insight acionável | `"Como foi o volume de usuarios vindos de Search no ultimo mes?"` | Resposta menciona tendência ou sinal, não apenas número bruto | ❌ |
-| D1.2 | Ranking com interpretação | `"Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-03-31? E por que?"` | Ranking + interpretação de negócio, não tabela crua | ❌ |
-| D1.3 | Linguagem de negócio | Qualquer resposta com dados | Em pt-BR, sem SQL exposta, sem jargão técnico | ❌ |
+| D1.1 | Insight acionável | `"Como foi o volume de usuarios vindos de Search no ultimo mes?"` | Resposta menciona tendência ou sinal, não apenas número bruto | ✅ |
+| D1.2 | Ranking com interpretação | `"Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-03-31? E por que?"` | Ranking + interpretação de negócio, não tabela crua | ✅ |
+| D1.3 | Linguagem de negócio | Qualquer resposta com dados | Em pt-BR, sem SQL exposta, sem jargão técnico | ✅ |
 
 ### D.2 Tratamento de Fora de Escopo
 
 | # | Teste | Pergunta | Resultado Esperado | Status |
 |---|---|---|---|---|
 | D2.1 | Tema totalmente fora | `"Me conta uma piada"` | Recusa educada, sem tool call | ✅ |
-| D2.2 | Métrica não suportada | `"Qual o ROAS de Search ontem?"` | Recusa explicando que ROAS não está no dataset | ❌ |
-| D2.3 | Campanha não suportada | `"Qual campanha deu mais lucro no Facebook ontem?"` | Recusa explicando que campanha/lucro não existe no schema | ❌ |
+| D2.2 | Métrica não suportada | `"Qual o ROAS de Search ontem?"` | Recusa explicando que ROAS não está no dataset | ✅ |
+| D2.3 | Campanha não suportada | `"Qual campanha deu mais lucro no Facebook ontem?"` | Recusa explicando que campanha/lucro não existe no schema | ✅ |
 | D2.4 | Canal não suportado | `"Trafego de TikTok no ultimo mes"` | Recusa informando canais suportados | ✅ |
 | D2.5 | Sem período | `"Quantos usuarios vieram de Search?"` | Pede esclarecimento de período, não falha silenciosamente | ✅ |
 
@@ -109,8 +109,8 @@
 |---|---|---|---|---|
 | D3.1 | Clarificação de data | 1: `"Quantos usuarios vieram de Search?"` → 2: `"nos ultimos 7 dias"` | Turno 2 merge com turno 1 e retorna dados | ✅ |
 | D3.2 | Clarificação de métrica | 1: `"Como foi Search nos ultimos 7 dias?"` (se ambíguo) → 2: `"receita"` ou `"usuarios"` | Turno 2 resolve ambiguidade e retorna dados corretos | ✅ |
-| D3.3 | Follow-up estratégico | 1: Qualquer query com dados → 2: `"O que fazer para melhorar esse canal?"` | Resposta com sugestões baseadas no contexto anterior | ❌ |
-| D3.4 | Follow-up diagnóstico | 1: Query com dados → 2: `"Por que Search ficou abaixo de Organic?"` | Interpretação/hipótese baseada nos dados, não recusa | ❌ |
+| D3.3 | Follow-up estratégico | 1: Qualquer query com dados → 2: `"O que fazer para melhorar esse canal?"` | Resposta com sugestões baseadas no contexto anterior | ✅ |
+| D3.4 | Follow-up diagnóstico | 1: Query com dados → 2: `"Por que Search ficou abaixo de Organic?"` | Interpretação/hipótese baseada nos dados, não recusa | ✅ |
 
 ### D.4 Formatos Temporais
 
@@ -119,10 +119,10 @@
 | D4.1 | ISO | `"Usuarios de Search entre 2024-01-01 e 2024-01-31"` | Dados do período correto | ✅ |
 | D4.2 | BR DD/MM/AAAA | `"Usuarios de Search entre 01/01/2024 e 31/01/2024"` | Mesmo resultado de D4.1 | ✅ |
 | D4.3 | BR DD/MM/AA | `"Usuarios de Search entre 01/01/24 e 31/01/24"` | Mesmo resultado de D4.1 | ✅ |
-| D4.4 | Relativo — ontem | `"Receita de Search ontem"` | Datas resolvidas para ontem | ❌ |
-| D4.5 | Relativo — este mês | `"Volume de trafego este mes"` | start_date = dia 1 do mês atual | ❌ |
-| D4.6 | Relativo — último mês | `"Receita por canal no ultimo mes"` | Período do mês anterior completo | ❌ |
-| D4.7 | Relativo — últimos N dias | `"Usuarios nos ultimos 7 dias"` | 7 dias corridos a partir de hoje | ❌ |
+| D4.4 | Relativo — ontem | `"Receita de Search ontem"` | Datas resolvidas para ontem | ✅ |
+| D4.5 | Relativo — este mês | `"Volume de trafego este mes"` | start_date = dia 1 do mês atual | ✅ |
+| D4.6 | Relativo — último mês | `"Receita por canal no ultimo mes"` | Período do mês anterior completo | ✅ |
+| D4.7 | Relativo — últimos N dias | `"Usuarios nos ultimos 7 dias"` | 7 dias corridos a partir de hoje | ✅ |
 
 ---
 

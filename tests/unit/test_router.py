@@ -151,6 +151,24 @@ def test_router_prioritizes_invalid_dates_when_detected() -> None:
             None,
             None,
         ),
+        (
+            "Usuarios nos ultimos 7 dias",
+            "traffic_volume",
+            None,
+            None,
+            date(2026, 4, 14),
+            date(2026, 4, 20),
+            None,
+        ),
+        (
+            "Usuarios ontem",
+            "traffic_volume",
+            None,
+            None,
+            date(2026, 4, 19),
+            date(2026, 4, 19),
+            None,
+        ),
     ],
 )
 def test_router_resolves_semantic_scenarios(

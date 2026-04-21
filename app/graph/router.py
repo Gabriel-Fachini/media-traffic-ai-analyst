@@ -19,6 +19,9 @@ YESTERDAY_PATTERN = re.compile(r"\bontem\b")
 THIS_MONTH_PATTERN = re.compile(r"\beste\s+mes\b")
 LAST_MONTH_PATTERN = re.compile(r"\bultimo\s+mes\b")
 LAST_N_DAYS_PATTERN = re.compile(r"\bultimos?\s+(\d+)\s+dias?\b")
+CALENDAR_MONTH_COMPLETE_PATTERN = re.compile(
+    r"\bmes\s+calendario\s+completo\b|\bmes\s+completo\b"
+)
 TEMPORAL_CONTEXT_PATTERN = re.compile(
     r"\b(?:entre|from)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\s+(?:e|a|ate|to)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\b"
     r"|\b(?:entre|from)\s+\d{4}-\d{2}-\d{2}\s+(?:e|a|ate|to)\s+\d{4}-\d{2}-\d{2}\b"
@@ -26,6 +29,8 @@ TEMPORAL_CONTEXT_PATTERN = re.compile(
     r"|\b(?:em|in|on|de|do|da|from)\s+\d{4}-\d{2}-\d{2}\b"
     r"|\b(?:no|na|nos|nas|em|in)\s+ultimo\s+mes\b"
     r"|\b(?:no|na|nos|nas|em|in)\s+este\s+mes\b"
+    r"|\bmes\s+calendario\s+completo\b"
+    r"|\bmes\s+completo\b"
     r"|\b(?:nos|nas|em|in)\s+ultimos?\s+\d+\s+dias?\b"
     r"|\bontem\b",
     re.IGNORECASE,
@@ -129,21 +134,29 @@ STRATEGY_FOLLOW_UP_TOKENS = frozenset(
     {
         "acao",
         "acoes",
+        "analise",
+        "analises",
         "aumentar",
         "crescer",
         "dependencia",
         "dependente",
         "diminuir",
+        "detalhar",
+        "detalhe",
         "diversificar",
+        "expandir",
+        "expanda",
         "estrategia",
         "estrategias",
         "fortalecer",
         "melhorar",
         "melhoria",
+        "monte",
         "otimizacao",
         "otimizar",
         "passo",
         "passos",
+        "plano",
         "priorizar",
         "proximo",
         "proximos",
@@ -152,14 +165,105 @@ STRATEGY_FOLLOW_UP_TOKENS = frozenset(
         "recomendacoes",
         "recomenda",
         "recomendar",
+        "retorne",
+        "retornar",
         "sugestao",
         "sugestoes",
+    }
+)
+FOLLOW_UP_ACTION_TOKENS = frozenset(
+    {
+        "aprofunde",
+        "aprofundar",
+        "continue",
+        "continuar",
+        "descreva",
+        "desenvolva",
+        "detalhar",
+        "detalhe",
+        "expanda",
+        "expandir",
+        "monte",
+        "retorne",
+        "retornar",
+    }
+)
+FOLLOW_UP_STRATEGY_OBJECT_TOKENS = frozenset(
+    {
+        "acao",
+        "acoes",
+        "analise",
+        "analises",
+        "estrategia",
+        "estrategias",
+        "plano",
+        "prioridade",
+        "prioridades",
+        "recomendacao",
+        "recomendacoes",
+        "sugestao",
+        "sugestoes",
+    }
+)
+GENERIC_CONTEXTUAL_FOLLOW_UP_ACTION_TOKENS = frozenset(
+    {
+        "ajuda",
+        "ajudar",
+        "ajude",
+        "continue",
+        "continuar",
+        "faca",
+        "fazer",
+        "monte",
+        "mostra",
+        "mostrar",
+        "mostre",
+        "responda",
+        "responder",
+        "retorne",
+        "retornar",
+        "segue",
+        "seguir",
+        "siga",
+        "traga",
+    }
+)
+GENERIC_CONTEXTUAL_FOLLOW_UP_REFERENCE_TOKENS = frozenset(
+    {
+        "ai",
+        "entao",
+        "essa",
+        "esse",
+        "isso",
+        "leitura",
+    }
+)
+CONTEXTUAL_DIAGNOSTIC_SIGNAL_TOKENS = frozenset(
+    {
+        "abaixo",
+        "acima",
+        "comparacao",
+        "comparar",
+        "comparativo",
+        "desempenho",
+        "melhor",
+        "melhores",
+        "outro",
+        "outra",
+        "outros",
+        "outras",
+        "pior",
+        "piores",
+        "performando",
+        "performar",
+        "performou",
     }
 )
 DIAGNOSTIC_FOLLOW_UP_TOKENS = frozenset(
     {
         "causa",
         "causas",
+        "diagnostica",
         "diagnostico",
         "entender",
         "explica",
@@ -277,11 +381,27 @@ SOURCE_FILTER_IGNORED_TOKENS = frozenset(
     | SUPPORTED_USER_METRIC_TOKENS
     | SUPPORTED_PERFORMANCE_METRIC_TOKENS
     | {
+        "a",
+        "as",
+        "essa",
+        "esse",
+        "isso",
         "midia",
         "media",
         "growth",
+        "mais",
+        "menos",
+        "os",
+        "outro",
+        "outra",
+        "outros",
+        "outras",
         "origem",
         "origens",
+        "qual",
+        "quais",
+        "que",
+        "quem",
         "source",
         "sources",
         "traffic_source",
@@ -420,6 +540,15 @@ def _match_last_month(reference_date: date) -> tuple[date, date]:
     return last_month_end.replace(day=1), last_month_end
 
 
+def _match_calendar_month_complete(reference_date: date) -> tuple[date, date]:
+    current_month_start = reference_date.replace(day=1)
+    if reference_date.month == 12:
+        next_month_start = date(reference_date.year + 1, 1, 1)
+    else:
+        next_month_start = date(reference_date.year, reference_date.month + 1, 1)
+    return current_month_start, next_month_start - timedelta(days=1)
+
+
 def _extract_relative_date_range(
     question: str,
     *,
@@ -443,6 +572,11 @@ def _extract_relative_date_range(
     for match in LAST_MONTH_PATTERN.finditer(normalized_question):
         relative_matches.append(
             (match.start(), _match_last_month(resolved_reference_date))
+        )
+
+    for match in CALENDAR_MONTH_COMPLETE_PATTERN.finditer(normalized_question):
+        relative_matches.append(
+            (match.start(), _match_calendar_month_complete(resolved_reference_date))
         )
 
     for match in LAST_N_DAYS_PATTERN.finditer(normalized_question):
@@ -569,6 +703,24 @@ def _question_supports_date_clarification(question: str) -> bool:
     return (has_user_metric or has_volume_signal) and has_channel_context
 
 
+def _question_is_aggregate_user_volume_query(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    if _question_requests_unsupported_dimension(question):
+        return False
+
+    has_user_metric = bool(question_tokens & SUPPORTED_USER_METRIC_TOKENS)
+    has_temporal_signal = question_contains_temporal_signal(question)
+    has_performance_metric = bool(question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS)
+
+    return has_user_metric and has_temporal_signal and not has_performance_metric
+
+
 def _question_contains_metric_follow_up_signal(question: str) -> bool:
     question_tokens = _extract_question_tokens(question)
     return bool(
@@ -608,7 +760,43 @@ def question_is_strategy_follow_up(question: str) -> bool:
             | SUPPORTED_PERFORMANCE_METRIC_TOKENS
         )
     )
-    return has_strategy_signal and has_analytics_anchor
+    has_contextual_strategy_request = bool(
+        question_tokens & FOLLOW_UP_ACTION_TOKENS
+    ) and bool(question_tokens & FOLLOW_UP_STRATEGY_OBJECT_TOKENS)
+    return (has_strategy_signal and has_analytics_anchor) or has_contextual_strategy_request
+
+
+def question_is_generic_contextual_follow_up(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    has_action = bool(question_tokens & GENERIC_CONTEXTUAL_FOLLOW_UP_ACTION_TOKENS)
+    has_reference = bool(question_tokens & GENERIC_CONTEXTUAL_FOLLOW_UP_REFERENCE_TOKENS)
+    return has_action and (has_reference or len(question_tokens) <= 3)
+
+
+def question_is_contextual_diagnostic_follow_up(question: str) -> bool:
+    question_tokens = _extract_question_tokens(question)
+    if not question_tokens:
+        return False
+
+    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
+        return False
+
+    has_signal = bool(question_tokens & CONTEXTUAL_DIAGNOSTIC_SIGNAL_TOKENS)
+    has_anchor = bool(
+        question_tokens
+        & (
+            SUPPORTED_CHANNEL_TOKENS
+            | SUPPORTED_SOURCE_TOKENS
+            | {"outro", "outra", "outros", "outras"}
+        )
+    )
+    return has_signal and has_anchor
 
 
 def question_is_diagnostic_follow_up(question: str) -> bool:
@@ -679,6 +867,9 @@ def _resolve_router_intent(question: str) -> Literal[
     if question_tokens & SUPPORTED_PERFORMANCE_METRIC_TOKENS:
         return "channel_performance"
 
+    if _question_is_aggregate_user_volume_query(question):
+        return "traffic_volume"
+
     if _question_supports_date_clarification(question):
         return "traffic_volume"
 
@@ -742,6 +933,7 @@ def question_contains_temporal_signal(question: str) -> bool:
             YESTERDAY_PATTERN,
             THIS_MONTH_PATTERN,
             LAST_MONTH_PATTERN,
+            CALENDAR_MONTH_COMPLETE_PATTERN,
             LAST_N_DAYS_PATTERN,
         )
     )
@@ -917,7 +1109,9 @@ __all__ = [
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "UNSUPPORTED_METRIC_MESSAGE",
     "build_router_decision",
+    "question_is_contextual_diagnostic_follow_up",
     "question_is_diagnostic_follow_up",
+    "question_is_generic_contextual_follow_up",
     "question_introduces_new_traffic_source",
     "question_is_metric_clarification_follow_up",
     "question_is_strategy_follow_up",
