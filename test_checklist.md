@@ -26,8 +26,8 @@
 | P0 | README final cobre setup, credenciais e arquitetura | ⬜ |
 | P0 | Repositório público no GitHub pronto para envio | ✅ |
 | P1 | `pytest -m live` passa com ambiente configurado | ✅ |
-| P1 | Multi-turn / `thread_id` demonstrado manualmente | ✅ |
-| P1 | `X-Debug` demonstra observabilidade suficiente para depuração | ✅ |
+| P1 | Multi-turn / `thread_id` demonstrado e coberto por `pytest` | ✅ |
+| P1 | `X-Debug` demonstrado e coberto por `pytest` | ✅ |
 
 ### 1.2 Evidência automatizada atual
 
@@ -36,6 +36,15 @@
 | Gate estático | `poetry run verify --agent` | `ruff`, `compileall` e `pyright` em `OK` | ✅ |
 | Suite determinística | `poetry run pytest --agent` | Suite local passa sem depender de BigQuery/LLM reais | ✅ |
 | Suite live | `poetry run pytest -m live` | Passa ou faz skip limpo quando ambiente não está configurado | ✅ |
+
+### 1.3 Mapa de automação
+
+| Camada | Comando | Cobre | Observação |
+| --- | --- | --- | --- |
+| Readiness rápido | `poetry run pytest tests/readiness/test_readiness_suite.py --agent` | S1-S4, S6, T1-T3, C1-C5, F1-F2, O1-O5, D1-D7, Q1-Q4 | determinístico e rápido |
+| Readiness live | `poetry run pytest -m "readiness and live" --agent` | tool calling real, tools reais no BigQuery, graph/API com ambiente real | opt-in por ambiente |
+| Wrapper opcional | `scripts/run_readiness_checks.sh [--verify] [--live] [--full]` | mesma trilha de readiness com atalho local | útil para regressão curta |
+| Manual obrigatório | checklist manual abaixo | S5, T4, R1-R5, README final e conferência pública do repo | não vale automatizar tudo |
 
 ---
 
@@ -88,6 +97,7 @@
 | --- | --- | --- | --- |
 | L1 | `poetry run pytest -m live` | Live smoke passa ou faz skip limpo por ambiente | ✅ |
 | L2 | `poetry run pytest --run-live --agent` | Suite local + live sem surpresas | ⬜ |
+| L3 | `poetry run pytest -m "readiness and live" --agent` | Gate live curto passa quando ambiente estiver pronto | ✅ |
 
 ---
 
@@ -99,63 +109,63 @@
 >
 > Use a CLI com `poetry run analyst-chat --debug`.
 
-| # | Teste | Ação | Resultado esperado | Prioridade | Status |
+| # | Prioridade | Teste | Ação | Resultado esperado | Status |
 | --- | --- | --- | --- | --- | --- |
-| S1 | Health check | `curl http://127.0.0.1:8000/health` | `status=ok` | P0 | ✅ |
-| S2 | Query HTTP válida | POST `/query` com pergunta de receita | `200`, `answer`, `tools_used`, `metadata` | P0 | ✅ |
-| S3 | Payload inválido | POST `/query` com `question=""` | `422` | P0 | ⬜ |
-| S4 | `X-Debug` | Repetir S2 com `X-Debug: true` | `metadata.debug` preenchido | P1 | ✅ |
-| S5 | CLI conversa com API | Abrir `analyst-chat` e enviar uma pergunta simples | Resposta renderizada sem stack trace | P0 | ✅ |
-| S6 | `thread_id` | Fazer 2 turnos no mesmo thread | `context_message_count` cresce | P1 | ✅ |
+| S1 | P0 | Health check | `curl http://127.0.0.1:8000/health` | `status=ok` | ✅ |
+| S2 | P0 | Query HTTP válida | POST `/query` com pergunta de receita | `200`, `answer`, `tools_used`, `metadata` | ✅ |
+| S3 | P0 | Payload inválido | POST `/query` com `question=""` | `422` | ✅ |
+| S4 | P1 | `X-Debug` | Repetir S2 com `X-Debug: true` | `metadata.debug` preenchido | ✅ |
+| S5 | P0 | CLI conversa com API | Abrir `analyst-chat` e enviar uma pergunta simples | Resposta renderizada sem stack trace | ✅ |
+| S6 | P1 | `thread_id` | Fazer 2 turnos no mesmo thread | `context_message_count` cresce | ✅ |
 
 ### 4.2 Tool Calling e consultas com dados
 
-| # | Cenário | Pergunta | Resultado esperado | Prioridade | Status |
+| # | Prioridade | Cenário | Pergunta | Resultado esperado | Status |
 | --- | --- | --- | --- | --- | --- |
-| T1 | Volume por canal | `Como foi o volume de usuarios vindos de Search no ultimo mes?` | `traffic_volume_analyzer` | P0 | ✅ |
-| T2 | Receita por canal | `Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?` | `channel_performance_analyzer` | P0 | ✅ |
-| T3 | Ranking geral | `Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-01-31?` | tool financeira com `traffic_source` nulo | P0 | ✅ |
-| T4 | Comparação entre canais | `Compare Search e Organic entre 2024-01-01 e 2024-01-31.` | comparação útil em linguagem natural | P0 | ⬜ |
+| T1 | P0 | Volume por canal | `Como foi o volume de usuarios vindos de Search no ultimo mes?` | `traffic_volume_analyzer` | ✅ |
+| T2 | P0 | Receita por canal | `Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?` | `channel_performance_analyzer` | ✅ |
+| T3 | P0 | Ranking geral | `Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-01-31?` | tool financeira com `traffic_source` nulo | ✅ |
+| T4 | P0 | Comparação entre canais | `Compare Search e Organic entre 2024-01-01 e 2024-01-31.` | comparação útil em linguagem natural | ⬜ |
 
 ### 4.3 Clarificações e ambiguidade
 
-| # | Cenário | Sequência | Resultado esperado | Prioridade | Status |
+| # | Prioridade | Cenário | Sequência | Resultado esperado | Status |
 | --- | --- | --- | --- | --- | --- |
-| C1 | Falta de período | `Qual foi a receita de Search?` | pede período, não quebra | P0 | ✅ |
-| C2 | Follow-up de período | `Qual foi a receita de Search?` → `Entre 2024-01-01 e 2024-01-31.` | merge correto e execução da tool | P0 | ✅ |
-| C3 | Métrica ambígua | `Como o Search performou ontem?` | agente pede clarificação entre volume e performance financeira | P0 | ✅ |
-| C4 | Resposta à ambiguidade | `Como o Search performou ontem?` → `volume de usuarios` | preserva `ontem` e chama `traffic_volume_analyzer` | P0 | ✅ |
-| C5 | Resposta à ambiguidade | `Como o Search performou ontem?` → `receita` | preserva `ontem` e chama `channel_performance_analyzer` | P0 | ✅ |
+| C1 | P0 | Falta de período | `Qual foi a receita de Search?` | pede período, não quebra | ✅ |
+| C2 | P0 | Follow-up de período | `Qual foi a receita de Search?` → `Entre 2024-01-01 e 2024-01-31.` | merge correto e execução da tool | ✅ |
+| C3 | P0 | Métrica ambígua | `Como o Search performou ontem?` | agente pede clarificação entre volume e performance financeira | ✅ |
+| C4 | P0 | Resposta à ambiguidade | `Como o Search performou ontem?` → `volume de usuarios` | preserva `ontem` e chama `traffic_volume_analyzer` | ✅ |
+| C5 | P0 | Resposta à ambiguidade | `Como o Search performou ontem?` → `receita` | preserva `ontem` e chama `channel_performance_analyzer` | ✅ |
 
 ### 4.4 Follow-ups com contexto
 
-| # | Cenário | Sequência | Resultado esperado | Prioridade | Status |
+| # | Prioridade | Cenário | Sequência | Resultado esperado | Status |
 | --- | --- | --- | --- | --- | --- |
-| F1 | Diagnóstico | `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?` → `O que explica essa concentracao?` | não cai em `out_of_scope`; responde com leitura diagnóstica | P0 | ✅ |
-| F2 | Estratégia | `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?` → `Quais acoes devemos priorizar agora?` | não cai em `out_of_scope`; responde com leitura estratégica | P0 | ✅ |
-| F3 | Follow-up adicional | após F1 ou F2, fazer mais 1-2 perguntas naturais | continuidade consistente no mesmo thread | P1 | ✅ |
+| F1 | P0 | Diagnóstico | `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?` → `O que explica essa concentracao?` | não cai em `out_of_scope`; responde com leitura diagnóstica | ✅ |
+| F2 | P0 | Estratégia | `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?` → `Quais acoes devemos priorizar agora?` | não cai em `out_of_scope`; responde com leitura estratégica | ✅ |
+| F3 | P1 | Follow-up adicional | após F1 ou F2, fazer mais 1-2 perguntas naturais | continuidade consistente no mesmo thread | ✅ |
 
 ### 4.5 Fora de escopo e guardrails
 
-| # | Cenário | Pergunta | Resultado esperado | Prioridade | Status |
+| # | Prioridade | Cenário | Pergunta | Resultado esperado | Status |
 | --- | --- | --- | --- | --- | --- |
-| O1 | Fora de escopo puro | `Me conta uma piada` | recusa curta e educada, sem tool call | P0 | ✅ |
-| O2 | Métrica ausente | `Qual foi o ROAS de Search ontem?` | recusa coerente com schema | P0 | ✅ |
-| O3 | Dimensão ausente | `Qual campanha deu mais lucro no Facebook ontem?` | recusa coerente com schema | P0 | ✅ |
-| O4 | Data inválida | `Qual foi a receita de Search em 31/02/2026?` | clarificação por data inválida | P0 | ⬜ |
-| O5 | Intervalo invertido | `Qual foi a receita de Search entre 2024-02-10 e 2024-01-10?` | clarificação por data inválida/invertida | P1 | ⬜ |
+| O1 | P0 | Fora de escopo puro | `Me conta uma piada` | recusa curta e educada, sem tool call | ✅ |
+| O2 | P0 | Métrica ausente | `Qual foi o ROAS de Search ontem?` | recusa coerente com schema | ✅ |
+| O3 | P0 | Dimensão ausente | `Qual campanha deu mais lucro no Facebook ontem?` | recusa coerente com schema | ✅ |
+| O4 | P0 | Data inválida | `Qual foi a receita de Search em 31/02/2026?` | clarificação por data inválida | ✅ |
+| O5 | P1 | Intervalo invertido | `Qual foi a receita de Search entre 2024-02-10 e 2024-01-10?` | clarificação por data inválida/invertida | ✅ |
 
 ### 4.6 Formatos temporais
 
-| # | Cenário | Pergunta | Resultado esperado | Prioridade | Status |
+| # | Prioridade | Cenário | Pergunta | Resultado esperado | Status |
 | --- | --- | --- | --- | --- | --- |
-| D1 | ISO | `Usuarios de Search entre 2024-01-01 e 2024-01-31` | datas corretas | P1 | ⬜ |
-| D2 | BR longa | `Usuarios de Search entre 01/01/2024 e 31/01/2024` | datas corretas | P1 | ⬜ |
-| D3 | BR curta | `Usuarios de Search entre 01/01/24 e 31/01/24` | datas corretas | P1 | ⬜ |
-| D4 | Relativo ontem | `Receita de Search ontem` | resolve para um dia | P1 | ⬜ |
-| D5 | Este mês | `Volume de trafego este mes` | resolve início do mês atual | P1 | ⬜ |
-| D6 | Último mês | `Receita por canal no ultimo mes` | resolve mês anterior completo | P1 | ⬜ |
-| D7 | Últimos N dias | `Usuarios nos ultimos 7 dias` | resolve janela correta | P1 | ⬜ |
+| D1 | P1 | ISO | `Usuarios de Search entre 2024-01-01 e 2024-01-31` | datas corretas | ✅ |
+| D2 | P1 | BR longa | `Usuarios de Search entre 01/01/2024 e 31/01/2024` | datas corretas | ✅ |
+| D3 | P1 | BR curta | `Usuarios de Search entre 01/01/24 e 31/01/24` | datas corretas | ✅ |
+| D4 | P1 | Relativo ontem | `Receita de Search ontem` | resolve para um dia | ✅ |
+| D5 | P1 | Este mês | `Volume de trafego este mes` | resolve início do mês atual | ✅ |
+| D6 | P1 | Último mês | `Receita por canal no ultimo mes` | resolve mês anterior completo | ✅ |
+| D7 | P1 | Últimos N dias | `Usuarios nos ultimos 7 dias` | resolve janela correta | ✅ |
 
 ---
 
@@ -163,38 +173,38 @@
 
 > Avaliar não só se “retornou algo”, mas se a resposta ajuda um gerente de Mídia/Growth.
 
-| # | Critério | O que observar | Prioridade | Status |
+| # | Prioridade | Critério | O que observar | Status |
 | --- | --- | --- | --- | --- |
-| R1 | Linguagem | Resposta em pt-BR, sem SQL exposta | P0 | ✅ |
-| R2 | Utilidade | Há insight acionável, não só despejo de números | P0 | ✅ |
-| R3 | Coerência | Não inventa métricas, canais, campanhas ou causalidade | P0 | ✅ |
-| R4 | Leitura de negócio | Traz implicação para Growth/Mídia | P0 | ✅ |
-| R5 | Follow-up | Quando não sabe a causa, explicita hipótese vs observação | P1 | ⬜ |
+| R1 | P0 | Linguagem | Resposta em pt-BR, sem SQL exposta | ✅ |
+| R2 | P0 | Utilidade | Há insight acionável, não só despejo de números | ✅ |
+| R3 | P0 | Coerência | Não inventa métricas, canais, campanhas ou causalidade | ✅ |
+| R4 | P0 | Leitura de negócio | Traz implicação para Growth/Mídia | ✅ |
+| R5 | P1 | Follow-up | Quando não sabe a causa, explicita hipótese vs observação | ⬜ |
 
 ---
 
 ## 6. Dados e SQL
 
-| # | Verificação | Como validar | Prioridade | Status |
+| # | Prioridade | Verificação | Como validar | Status |
 | --- | --- | --- | --- | --- |
-| Q1 | `traffic_volume_analyzer` consulta `users` corretamente | revisão de código + teste T1 | P0 | ⬜ |
-| Q2 | `channel_performance_analyzer` faz JOIN entre `users`, `orders` e `order_items` | revisão de código + teste T2/T3 | P0 | ⬜ |
-| Q3 | SQL parametrizada | revisar uso de parâmetros na construção das queries | P0 | ⬜ |
-| Q4 | Sem concatenação de input na SQL | revisão de código | P0 | ⬜ |
-| Q5 | Ferramentas reais no BigQuery | `pytest -m live` ou smoke manual com credenciais | P1 | ⬜ |
+| Q1 | P0 | `traffic_volume_analyzer` consulta `users` corretamente | revisão de código + readiness + teste T1 | ✅ |
+| Q2 | P0 | `channel_performance_analyzer` faz JOIN entre `users`, `orders` e `order_items` | revisão de código + readiness + teste T2/T3 | ✅ |
+| Q3 | P0 | SQL parametrizada | readiness + revisão curta das queries | ✅ |
+| Q4 | P0 | Sem concatenação de input na SQL | readiness + revisão de código | ✅ |
+| Q5 | P1 | Ferramentas reais no BigQuery | `pytest -m live` ou smoke manual com credenciais | ✅ |
 
 ---
 
 ## 7. Entregáveis Finais
 
-| # | Item | O que precisa ser checado | Prioridade | Status |
+| # | Prioridade | Item | O que precisa ser checado | Status |
 | --- | --- | --- | --- | --- |
-| E1 | GitHub público | repositório acessível publicamente | P0 | ⬜ |
-| E2 | README setup | dependências, `poetry`, credenciais GCP e chaves de LLM | P0 | ⬜ |
-| E3 | README arquitetura | explicação clara do agente e das tools | P0 | ⬜ |
-| E4 | README execução | como subir API, usar CLI e rodar testes | P0 | ⬜ |
-| E5 | `.env.example` | variáveis mínimas documentadas | P1 | ⬜ |
-| E6 | Evidência live | se possível, incluir checkpoint final com ambiente real | P1 | ⬜ |
+| E1 | P0 | GitHub público | repositório acessível publicamente | ✅ |
+| E2 | P0 | README setup | dependências, `poetry`, credenciais GCP e chaves de LLM | ⬜ |
+| E3 | P0 | README arquitetura | explicação clara do agente e das tools | ⬜ |
+| E4 | P0 | README execução | como subir API, usar CLI e rodar testes | ⬜ |
+| E5 | P1 | `.env.example` | variáveis mínimas documentadas | ⬜ |
+| E6 | P1 | Evidência live | se possível, incluir checkpoint final com ambiente real | ⬜ |
 
 ---
 

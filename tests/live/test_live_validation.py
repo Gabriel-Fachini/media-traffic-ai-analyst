@@ -17,7 +17,7 @@ from app.tools import channel_performance_analyzer, traffic_volume_analyzer
 from app.utils.config import Settings
 
 
-pytestmark = [pytest.mark.integration, pytest.mark.live]
+pytestmark = [pytest.mark.integration, pytest.mark.live, pytest.mark.readiness]
 
 JANUARY_START = date(2024, 1, 1)
 JANUARY_END = date(2024, 1, 31)
