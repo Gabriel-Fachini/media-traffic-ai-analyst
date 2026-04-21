@@ -1,233 +1,229 @@
 # Media Traffic AI Analyst - Agents Blueprint
 
-## 1. Objetivo
+## 1. Objetivo atual
 
-Inicializar a definicao dos agentes do MVP para responder perguntas de Midia e Growth com base em dados reais do BigQuery, usando tool calling e resposta em linguagem natural.
+Entregar um MVP funcional de um agente de analytics para Midia e Growth, capaz de:
 
-## 2. Escopo do Produto
+- entender perguntas em linguagem natural sobre trafego, pedidos e receita por canal;
+- consultar dados reais do dataset `bigquery-public-data.thelook_ecommerce`;
+- responder em linguagem natural com tool calling, sem depender de um prompt monolitico;
+- sustentar uma camada de confianca com verificacoes automatizadas e smoke tests opt-in.
 
-- Dominio: analise de trafego e receita por canal (Search, Organic, Facebook, etc.) no dataset thelook_ecommerce.
-- Fonte de dados: bigquery-public-data.thelook_ecommerce (users, orders, order_items).
-- Saida esperada: insight util para negocio, nao apenas tabela bruta.
-- Fora de escopo: perguntas gerais (ex.: culinaria), dados de outras empresas e qualquer resposta sem base de tool.
-- Interacao atual do MVP: terminal/CLI.
-- UI web (ex.: Streamlit) fica para evolucao pos-MVP.
+## 2. Estado atual do produto
 
-## 3. Requisitos de Plataforma
+- Dominio: analise de trafego e receita por canal no dataset `thelook_ecommerce`.
+- Fonte de dados: tabelas `users`, `orders` e `order_items`.
+- Superficie de execucao:
+  - API FastAPI com `/health` e `/query`
+  - CLI `analyst-chat`, conversacional, consumindo a API local
+- Persistencia conversacional atual:
+  - `thread_id` opcional no contrato HTTP
+  - continuidade multi-turn em memoria via `MemorySaver`
+  - nao ha persistencia duravel entre reinicios do processo
+- Formatos temporais suportados no roteamento:
+  - `YYYY-MM-DD`
+  - `DD/MM/AAAA`
+  - `DD/MM/AA`
+  - `ontem`, `este mes`, `ultimo mes`, `ultimos N dias`
+- Follow-ups suportados:
+  - clarificacao de datas
+  - clarificacao guiada de metrica ambigua
+  - follow-up estrategico
+  - follow-up diagnostico
+- Modo debug:
+  - header `X-Debug`
+  - devolve `resolved_question`, `router_decision` e erros tecnicos estruturados
+
+## 3. Requisitos de plataforma
 
 - Linguagem: Python 3.10+
 - API: FastAPI
-- Interface inicial: terminal/CLI (sem UI web nesta fase)
-- Orquestrador: LangGraph (preferencial)
-- Dados: google-cloud-bigquery com queries parametrizadas
-- Validacao: Pydantic + type hints
-- Resiliencia: falhas de LLM ou GCP devem retornar recusa elegante
+- Interface inicial: terminal/CLI
+- Orquestrador: LangGraph
+- Dados: `google-cloud-bigquery` com SQL parametrizada
+- Modelagem e contratos: Pydantic + type hints
+- LLM:
+  - provider principal configurado por ambiente
+  - suporte atual a OpenAI e Anthropic
+  - fallback opcional entre providers/modelos
 
-## 4. Mapa de Agentes
+## 4. Arquitetura atual de agentes
 
 ### 4.1 Router Agent
 
-Responsabilidade:
+Responsabilidades atuais:
 
-- Interpretar a pergunta, identificar intencao e extrair parametros (traffic_source, start_date, end_date).
-- Decidir qual tool chamar ou quando negar por fora de escopo.
-
-Entradas:
-
-- question: str
-
-Saidas:
-
-- intent: traffic_volume | channel_performance | out_of_scope
-- normalized_params: {traffic_source?, start_date, end_date}
-
-Regras:
-
-- Nunca inventar metricas.
-- Se faltar data, pedir clarificacao ou aplicar padrao explicito de periodo.
+- classificar a intencao da pergunta;
+- normalizar `traffic_source`, `start_date` e `end_date`;
+- decidir entre:
+  - `traffic_volume`
+  - `channel_performance`
+  - `strategy_follow_up`
+  - `diagnostic_follow_up`
+  - `ambiguous_analytics`
+  - `out_of_scope`
+- emitir short-circuit com mensagem pronta quando houver:
+  - pergunta vazia
+  - fora de escopo
+  - dimensao nao suportada
+  - metrica nao suportada
+  - canal nao suportado
+  - datas ausentes
+  - datas invalidas
+  - ambiguidade entre volume e performance financeira
 
 ### 4.2 Traffic Volume Analyzer Agent
 
-Responsabilidade:
-
-- Executar analise de volume de usuarios por traffic_source.
-
-Tool:
-
-- traffic_volume_analyzer(TrafficVolumeInput)
-
-Query base:
-
-- Agregacao em users com COUNT(DISTINCT id), filtro por periodo e source opcional.
-
-Saida esperada:
-
-- Lista agregada por canal com user_count.
+- Tool: `traffic_volume_analyzer(TrafficVolumeInput)`
+- Query: agregacao em `users` com `COUNT(DISTINCT id)`
+- Filtros: periodo obrigatorio e `traffic_source` opcional
+- Saida: `TrafficVolumeOutput`
 
 ### 4.3 Channel Performance Analyzer Agent
 
-Responsabilidade:
-
-- Executar analise financeira por canal (pedidos e receita).
-
-Tool:
-
-- channel_performance_analyzer(ChannelPerformanceInput)
-
-Query base:
-
-- Join users -> orders -> order_items
-- Metricas: total_orders e total_revenue por traffic_source
-
-Saida esperada:
-
-- Ranking de canais por receita no periodo.
+- Tool: `channel_performance_analyzer(ChannelPerformanceInput)`
+- Query: `users -> orders -> order_items`
+- Metricas: `total_orders` e `total_revenue`
+- Saida: `ChannelPerformanceOutput`
 
 ### 4.4 Insight Synthesizer Agent
 
-Responsabilidade:
-
-- Traduzir resultado tecnico para insight de negocio claro e acionavel.
-
-Entradas:
-
-- Dados retornados pelas tools
-- Contexto da pergunta
-
-Saida:
-
-- answer em linguagem natural
-- leitura de tendencia + comparacao entre canais
-
-Regras:
-
-- Nao retornar dump cru de SQL/tabela como resposta final.
-- Explicar sinal principal e possivel implicacao para Growth.
+- sintetiza a resposta final em pt-BR a partir do resultado estruturado das tools;
+- trata follow-ups estrategicos e diagnosticos com prompts dedicados;
+- converte falhas temporarias de LLM em resposta tratada.
 
 ### 4.5 Scope Guard Agent
 
-Responsabilidade:
+- continua responsavel por recusas curtas e educadas;
+- hoje a decisao pode vir tanto por fora de escopo quanto por dimensoes/metricas ausentes do schema.
 
-- Responder com recusa educada para pedidos fora do dominio.
+## 5. Fluxo orquestrado atual
 
-Exemplos de gatilho:
-
-- "Como fazer um bolo?"
-- "Qual a receita de outra empresa?"
-
-Saida:
-
-- Mensagem curta, educada, orientando o escopo valido.
-
-## 5. Fluxo Orquestrado (LangGraph)
-
-Fluxo de uso atual: pergunta enviada via terminal/CLI para a API.
+Fluxo padrao via API/CLI:
 
 1. Start
 2. Router Agent
 3. Branch:
-   - traffic_volume -> Traffic Volume Analyzer Agent
-   - channel_performance -> Channel Performance Analyzer Agent
-   - out_of_scope -> Scope Guard Agent
-4. Se houve consulta de dados: Insight Synthesizer Agent
+   - `traffic_volume` -> `traffic_volume_analyzer`
+   - `channel_performance` -> `channel_performance_analyzer`
+   - `strategy_follow_up` -> Insight Synthesizer
+   - `diagnostic_follow_up` -> Insight Synthesizer
+   - short-circuit -> mensagem pronta
+4. Quando houve consulta de dados: Insight Synthesizer
 5. Retorno para API
 
-## 6. Contratos de Dados (MVP)
+Observacoes importantes:
 
-### 6.1 Input das Tools
+- o grafo usa `thread_id` para retomar contexto em memoria;
+- campos overwrite-style como `final_answer` e `tools_used` sao resetados a cada turno para evitar vazamento entre checkpoints;
+- follow-ups de clarificacao podem fundir a pergunta anterior com a atual quando o contexto for valido.
 
-- TrafficVolumeInput:
-  - traffic_source: Optional[str]
-  - start_date: date
-  - end_date: date
+## 6. Contratos de dados atuais
 
-- ChannelPerformanceInput:
-  - traffic_source: Optional[str]
-  - start_date: date
-  - end_date: date
+### 6.1 Input das tools
+
+- `TrafficVolumeInput`
+  - `traffic_source: Optional[str]`
+  - `start_date: date`
+  - `end_date: date`
+- `ChannelPerformanceInput`
+  - `traffic_source: Optional[str]`
+  - `start_date: date`
+  - `end_date: date`
 
 ### 6.2 Contrato HTTP
 
-- QueryRequest:
-  - question: str (max 1000)
+- `QueryRequest`
+  - `question: str` (max 1000, nao vazia)
+  - `thread_id: Optional[str]`
+- `QueryResponse`
+  - `answer: str`
+  - `tools_used: list[str]`
+  - `metadata: QueryMetadata | None`
+- `QueryMetadata`
+  - `thread_id: str`
+  - `thread_id_source: "generated" | "provided"`
+  - `context_message_count: int`
+  - `debug: DebugInfo | None`
 
-- QueryResponse:
-  - answer: str
-  - tools_used: list[str]
-  - metadata: dict (opcional no MVP inicial)
+## 7. Politica de seguranca e confiabilidade
 
-## 7. Politica de Seguranca e Confiabilidade
+- SQL sempre parametrizada; nao concatenar input de usuario na query.
+- Falhas de BigQuery sao encapsuladas em `BigQueryClientError`.
+- Timeout de LLM e convertido em erro HTTP 500 estruturado.
+- O modo debug nao expoe stack trace bruto; retorna apenas diagnostico resumido.
+- Persistencia atual e apenas em RAM. Reiniciar o processo elimina o contexto multi-turn.
 
-- Usar somente SQL parametrizada (Prepared Statements).
-- Proibir concatenacao direta de SQL com input do usuario.
-- Capturar GoogleAPIError e timeout de LLM.
-- Em erro temporario, retornar mensagem tratada (sem stack trace).
+## 8. Pipeline de validacao atual
 
-## 8. Politica de Prompt Base
+### 8.1 Gate sem testes
 
-System prompt recomendado:
+Antes de considerar uma alteracao tecnica concluida, rodar:
 
-- O agente atua como Analista Junior de Midia focado no dataset thelook_ecommerce.
-- Nao discute topicos fora de negocio de trafego/receita.
-- Nao responde sem consultar tool quando pergunta depende de dado.
+- `poetry run verify`
+- `poetry run verify --agent`
+  - modo enxuto para iteracoes com agentes, mantendo apenas status por etapa e detalhes curtos em caso de falha
 
-## 9. Mapeamento com as Specs
+O comando executa:
 
-- requirements.md:
-  - RFA01: Router Agent + tool calling
-  - RFA02: Traffic Volume Analyzer Agent
-  - RFA03: Channel Performance Analyzer Agent
-  - RFA04: Insight Synthesizer Agent
-  - RFA05: Scope Guard Agent
+1. `poetry run ruff check app scripts tests`
+2. `python3 -m compileall app scripts tests`
+3. `poetry run pyright`
 
-- design.md:
-  - Fluxo em grafo, contratos Pydantic, SQL parametrizada, fallback de erro
+### 8.2 Suite automatizada
 
-- tasks.md:
-  - Fase 1: setup de ambiente, config e BigQueryClient
-  - Fase 2: implementacao das tools
-  - Fase 3: orquestracao no LangGraph
-  - Fase 4: exposicao via FastAPI
-  - Fase 5: interacao em terminal (CLI) e README final
-  - Backlog pos-MVP: UI web opcional (avaliar Streamlit)
+- `poetry run pytest`
+  - suite deterministica padrao
+  - nao depende de BigQuery nem de providers LLM externos
+- `poetry run pytest --agent`
+  - mesma suite padrao com output minimizado para reduzir consumo de tokens durante iteracoes
+- `poetry run pytest -m live`
+  - smoke/integration tests opt-in
+  - usa BigQuery e/ou providers LLM reais quando o ambiente estiver configurado
+- `poetry run pytest --run-live`
+  - modo combinado
+  - roda a suite padrao e inclui tambem os testes `live`
+- `poetry run pytest --run-live --agent`
+  - modo combinado com output enxuto
 
-## 10. Definition of Done do agents.md (inicial)
+### 8.3 Cobertura esperada da suite
 
-- Estrutura de agentes definida e alinhada com requisitos.
-- Fronteiras de escopo explicitas.
-- Contratos de entrada/saida descritos para iniciar implementacao.
+- unit:
+  - roteador
+  - contratos Pydantic
+  - configuracao
+  - analyzers com client fake
+- integration:
+  - workflow LangGraph com tools e synthesis fake
+  - API FastAPI com `TestClient` e dependency overrides
+- live:
+  - tools reais no BigQuery
+  - tool binding do LLM
+  - graph/API end-to-end com ambiente configurado
 
-## 10.1 Pipeline de Validacao Durante o Desenvolvimento
+## 9. Mapeamento com as fases
 
-- Antes de considerar uma alteracao tecnica concluida, executar:
-  - `poetry run ruff check app scripts`
-  - `python3 -m compileall app scripts`
-  - `poetry run pyright`
-- Quando a alteracao tocar tools BigQuery, preferir tambem validacao manual com:
-  - `poetry run python scripts/manual_validate_tools.py`
-- Quando a alteracao tocar binding/orquestracao de tools, validar pelo menos:
-  - execucao direta das tools
-  - smoke test de `bind_tools()` confirmando `tool_calls`
+- Fase 1: setup, config e BigQuery client implementados
+- Fase 2: tools implementadas
+- Fase 3: orquestracao LangGraph implementada
+- Fase 4: exposicao FastAPI implementada
+- Fase 5: CLI implementada
+- Entrega final ainda pendente:
+  - consolidacao do `README.md`
+  - acabamento final dos materiais de entrega
 
-## 11. Skills Ativas (Fase Atual)
-
-- langchain-ai/langchain-skills@langgraph-fundamentals
-- wshobson/agents@prompt-engineering-patterns
-- wshobson/agents@sql-optimization-patterns
-
-Objetivo do uso:
-
-- LangGraph fundamentals para estruturar o grafo de agentes com estado e roteamento claro.
-- Prompt engineering patterns para aumentar consistencia de roteamento e qualidade da resposta final.
-- SQL optimization patterns para manter queries legiveis, eficientes e seguras no BigQuery.
-
-## 12. Diretrizes de Escopo Atual (MVP Simples)
+## 10. Diretrizes de escopo atuais
 
 - Priorizar implementacao simples e incremental.
-- Nao incluir observability nesta fase (tracing, monitoramento e avaliacao automatizada).
-- Nao incluir estimativa ou controle de custos nesta fase (uso previsto em free tier).
-- Nao implementar testes automatizados no MVP inicial; validacao sera manual.
-- Nao implementar Streamlit/UI web nesta fase; interacao sera via terminal/CLI.
-- Manter `traffic_source` singular no contrato das tools durante o MVP.
-- Quando houver comparacao entre canais, preferir uma consulta agregada por periodo e comparar os canais na camada de sintese antes de ampliar o schema.
-- Nao atualizar `README.md` durante a implementacao incremental. O README deve ser consolidado no fim do projeto, na fase de entrega, salvo pedido explicito do usuario para antecipar alguma mudanca.
+- Manter `traffic_source` singular no contrato das tools.
+- Comparacoes entre canais devem continuar preferindo consulta agregada com sintese na camada final.
+- Nao incluir UI web nesta fase.
+- Nao incluir observability/custos como eixo principal do MVP.
+- `README.md` continua reservado para consolidacao final, salvo pedido explicito do usuario.
+
+## 11. Definition of Done atual de `agents.md`
+
+- estado real do projeto documentado;
+- fronteiras de escopo atuais explicitas;
+- contratos e limitacoes operacionais registradas;
+- pipeline de verificacao e estrategia de testes automatizados documentadas.

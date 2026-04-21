@@ -22,6 +22,7 @@ dependencies = [
 
 [project.scripts]
 analyst-chat = "app.cli:entrypoint"
+verify = "app.verify:main"
 
 [tool.poetry]
 packages = [{ include = "app" }]
@@ -29,12 +30,22 @@ packages = [{ include = "app" }]
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.11.6"
 pyright = "^1.1.406"
+pytest = "^9.0.3"
 
 [tool.fastapi]
 entrypoint = "app.main:app"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+	"unit: deterministic unit tests for pure business logic and contracts",
+	"integration: deterministic integration tests for workflow and API behavior",
+	"live: opt-in tests that use real BigQuery and/or LLM providers",
+]
+addopts = ["--strict-markers", "-ra"]
+
 [tool.pyright]
-include = ["app", "scripts"]
+include = ["app", "scripts", "tests"]
 typeCheckingMode = "basic"
 reportMissingTypeStubs = false
 
