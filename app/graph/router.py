@@ -11,7 +11,7 @@ EXPLICIT_DATE_TOKEN_PATTERN = re.compile(
     r"\b(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{2}(?:\d{2})?)\b"
 )
 DIMENSION_REQUEST_PATTERN = re.compile(
-    r"\b(?:por|by|per)\s+([a-z0-9_]+(?:\s+[a-z0-9_]+)?)\b"
+    r"\b(?:por|by|per)\s+([a-z0-9_]+)(?:\s+([a-z0-9_]+))?\b"
 )
 SOURCE_FILTER_PATTERN = re.compile(r"\b(?:de|do|da|from)\s+([a-z0-9_]+)\b")
 QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
@@ -195,6 +195,35 @@ SUPPORTED_ANALYTICS_DIMENSION_TOKENS = frozenset(
         "instagram",
     }
 )
+DIMENSION_REQUEST_IGNORED_TOKENS = frozenset(
+    {
+        "a",
+        "ao",
+        "as",
+        "ate",
+        "com",
+        "como",
+        "da",
+        "das",
+        "de",
+        "do",
+        "dos",
+        "e",
+        "em",
+        "entre",
+        "na",
+        "nas",
+        "no",
+        "nos",
+        "o",
+        "os",
+        "para",
+        "por",
+        "qual",
+        "que",
+        "se",
+    }
+)
 UNSUPPORTED_METRIC_TOKENS = frozenset(
     {
         "cac",
@@ -320,10 +349,34 @@ def _extract_explicit_date_tokens(question: str) -> list[str]:
 
 def _extract_requested_dimensions(question: str) -> list[str]:
     normalized_question = _normalize_text(question)
-    return [
-        requested_dimension.strip().replace(" ", "_")
-        for requested_dimension in DIMENSION_REQUEST_PATTERN.findall(normalized_question)
-    ]
+    requested_dimensions: list[str] = []
+
+    for first_token, second_token in DIMENSION_REQUEST_PATTERN.findall(normalized_question):
+        if first_token in DIMENSION_REQUEST_IGNORED_TOKENS:
+            continue
+
+        supported_dimension_candidates = []
+        if second_token:
+            supported_dimension_candidates.append(f"{first_token}_{second_token}")
+        supported_dimension_candidates.append(first_token)
+
+        matched_supported_dimension = next(
+            (
+                candidate
+                for candidate in supported_dimension_candidates
+                if candidate in SUPPORTED_ANALYTICS_DIMENSION_TOKENS
+            ),
+            None,
+        )
+        if matched_supported_dimension is not None:
+            if matched_supported_dimension not in requested_dimensions:
+                requested_dimensions.append(matched_supported_dimension)
+            continue
+
+        if first_token not in requested_dimensions:
+            requested_dimensions.append(first_token)
+
+    return requested_dimensions
 
 
 def _parse_explicit_date_token(date_token: str) -> date:
