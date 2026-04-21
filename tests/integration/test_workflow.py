@@ -470,6 +470,38 @@ class ClarifyingAgentLLM(FakeAgentLLM):
         )
 
 
+@dataclass
+class ParaphrasedAmbiguousMetricClarifyingAgentLLM(FakeAgentLLM):
+    prompts: list[str] = field(default_factory=list)
+
+    def invoke(self, messages: list[object]) -> AIMessage:
+        last_content = ""
+        if messages:
+            last_message = messages[-1]
+            last_content = getattr(last_message, "content", "")
+            if not isinstance(last_content, str):
+                last_content = str(last_content)
+        self.prompts.append(last_content)
+
+        from langchain_core.messages import HumanMessage
+
+        all_human_text = " ".join(
+            str(msg.content)
+            for msg in messages
+            if isinstance(msg, HumanMessage)
+        ).lower()
+        if (
+            "performou ontem" in all_human_text
+            and "volume" not in all_human_text
+            and "usuario" not in all_human_text
+            and "receita" not in all_human_text
+            and "pedido" not in all_human_text
+        ):
+            return AIMessage(content="Voce quer olhar usuarios ou receita/pedidos?")
+
+        return super().invoke(messages)
+
+
 def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     clarifying_agent_llm = ClarifyingAgentLLM()
     synthesis_llm = FakeSynthesisLLM()
@@ -504,6 +536,76 @@ def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     assert router_decision.refusal_reason is None
 
 
+<<<<<<< Updated upstream
+=======
+def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clarification() -> None:
+    graph_bundle = build_deterministic_graph_bundle()
+    thread_id = "ambiguous-analytics-clarification-thread"
+
+    first_state = invoke_analytics_graph(
+        "Como o Search performou ontem?",
+        graph=graph_bundle.graph,
+        thread_id=thread_id,
+    )
+    second_state = invoke_analytics_graph(
+        "volume de usuarios",
+        graph=graph_bundle.graph,
+        thread_id=thread_id,
+    )
+    router_decision = _require_router_decision(second_state)
+
+    assert "volume de usuarios ou performance financeira" in _require_str(
+        first_state, "final_answer"
+    )
+    assert "traffic_volume_analyzer" in _require_list(second_state, "tools_used")
+    assert (
+        _require_str(second_state, "resolved_question")
+        == "Como o Search performou ontem? volume de usuarios"
+    )
+    assert router_decision.intent == "traffic_volume"
+    assert router_decision.normalized_params.traffic_source == "Search"
+    assert router_decision.normalized_params.start_date is not None
+    assert router_decision.normalized_params.end_date is not None
+
+
+def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> None:
+    clarifying_agent_llm = ParaphrasedAmbiguousMetricClarifyingAgentLLM()
+    synthesis_llm = FakeSynthesisLLM()
+    fake_tools = FakeAnalyticsTools()
+    graph = build_analytics_graph(
+        agent_llm=clarifying_agent_llm,
+        response_llm=synthesis_llm,
+        tools=fake_tools.build(),
+        checkpointer=MemorySaver(),
+    )
+
+    thread_id = "paraphrased-ambiguous-analytics-clarification-thread"
+    first_state = invoke_analytics_graph(
+        "Como o Search performou ontem?",
+        graph=graph,
+        thread_id=thread_id,
+    )
+    second_state = invoke_analytics_graph(
+        "receita",
+        graph=graph,
+        thread_id=thread_id,
+    )
+    router_decision = _require_router_decision(second_state)
+
+    assert _require_str(first_state, "final_answer") == (
+        "Voce quer olhar usuarios ou receita/pedidos?"
+    )
+    assert "channel_performance_analyzer" in _require_list(second_state, "tools_used")
+    assert _require_str(second_state, "resolved_question") == (
+        "Como o Search performou ontem? receita"
+    )
+    assert router_decision.intent == "channel_performance"
+    assert router_decision.normalized_params.traffic_source == "Search"
+    assert router_decision.normalized_params.start_date is not None
+    assert router_decision.normalized_params.end_date is not None
+
+
+>>>>>>> Stashed changes
 def test_graph_resets_final_answer_between_short_circuits(
     graph_bundle: DeterministicGraphBundle,
 ) -> None:

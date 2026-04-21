@@ -39,6 +39,7 @@
 
 ### B.1 API Funcional
 
+<<<<<<< Updated upstream
 | # | Teste | Como testar | Resultado Esperado | Status |
 |---|---|---|---|---|
 | B1.1 | Health check | `curl http://localhost:8000/health` | `{"status":"ok","environment":"dev"}` | ✅ |
@@ -46,6 +47,15 @@
 | B1.3 | Query vazia | `curl -X POST http://localhost:8000/query -H "Content-Type: application/json" -d '{"question":""}'` | 422 Validation Error | ✅ |
 | B1.4 | Debug header | Repetir B1.2 com `-H "X-Debug: true"` | `metadata.debug` populado com `resolved_question` e `router_decision` | ✅ |
 | B1.5 | Thread continuidade | Usar `thread_id` retornado de B1.2 em nova request | `thread_id_source: "provided"`, `context_message_count` > anterior | ✅ |
+=======
+| Item | O que precisa estar provado | Como validar | Status |
+| --- | --- | --- | --- |
+| Python 3.10+ | Projeto roda na stack pedida | Conferir `pyproject.toml` e ambiente local | ⬜ |
+| FastAPI ou Flask | Superfície HTTP real existe | `poetry run fastapi dev` e `/health` | ⬜ |
+| Orquestrador de IA | Não é prompt único; há orquestração explícita | Conferir `app/graph/workflow.py` | ⬜ |
+| Tool Calling | O agente decide quando chamar ferramenta | Ver seção 4.2, testes T1-T4 abaixo | ⬜ |
+| Separação prompt vs execução | Prompt, workflow e tools estão separados | Revisão rápida em `app/graph/prompts.py`, `app/graph/workflow.py`, `app/tools/` | ⬜ |
+>>>>>>> Stashed changes
 
 ### B.2 Tratamento de Erros
 

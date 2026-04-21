@@ -259,6 +259,31 @@ def _has_prior_successful_tool_context(state: AnalyticsGraphState) -> bool:
     )
 
 
+def _get_previous_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
+    messages = list(state.get("messages", []))
+    turn_start_index = _resolve_turn_start_index(state)
+    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
+    previous_messages = messages[:bounded_turn_start_index]
+    if not previous_messages:
+        return []
+
+    previous_turn_start_index = 0
+    for index in range(len(previous_messages) - 1, -1, -1):
+        if isinstance(previous_messages[index], HumanMessage):
+            previous_turn_start_index = index
+            break
+
+    return previous_messages[previous_turn_start_index:]
+
+
+def _turn_has_tool_activity(messages: list[AnyMessage]) -> bool:
+    return any(
+        isinstance(message, ToolMessage)
+        or (isinstance(message, AIMessage) and message.tool_calls)
+        for message in messages
+    )
+
+
 def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
     messages = list(state.get("messages", []))
     turn_start_index = state.get("turn_start_index", _resolve_turn_start_index(state))
@@ -317,6 +342,61 @@ def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
     return "\n\n".join(context_blocks)
 
 
+<<<<<<< Updated upstream
+=======
+def _previous_turn_opened_ambiguous_metric_clarification(
+    state: AnalyticsGraphState,
+) -> bool:
+    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
+    if previous_router_decision is None:
+        return False
+    if previous_router_decision.intent != "ambiguous_analytics":
+        return False
+
+    previous_turn_messages = _get_previous_turn_messages(state)
+    if not previous_turn_messages:
+        return False
+    if _turn_has_tool_activity(previous_turn_messages):
+        return False
+
+    return bool(_get_last_prior_ai_answer(state))
+
+
+def _build_follow_up_system_messages(
+    state: AnalyticsGraphState,
+    router_decision: RouterDecision | None,
+) -> list[SystemMessage]:
+    if router_decision is None or router_decision.intent not in {
+        "strategy_follow_up",
+        "diagnostic_follow_up",
+    }:
+        return []
+
+    follow_up_context = _build_strategy_follow_up_context(state)
+    if follow_up_context is None:
+        return []
+
+    intent_prompt = (
+        STRATEGY_FOLLOW_UP_SYSTEM_PROMPT
+        if router_decision.intent == "strategy_follow_up"
+        else DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT
+    )
+    return [
+        SystemMessage(content=intent_prompt),
+        SystemMessage(
+            content=(
+                "Contexto analitico anterior do mesmo thread:\n"
+                f"{follow_up_context}\n\n"
+                "Use esse contexto para responder o follow-up sem inventar fatos. "
+                "Se o contexto atual ja for suficiente, responda diretamente sem "
+                "tool_call. Se realmente precisar de novos dados dentro do schema, "
+                "voce pode chamar uma tool."
+            )
+        ),
+    ]
+
+
+>>>>>>> Stashed changes
 def _infer_follow_up_intent_from_previous_context(
     *,
     previous_router_decision: RouterDecision | None,
@@ -497,6 +577,28 @@ def _build_agent_clarification_follow_up_question(
         }:
             return _merge_follow_up_with_previous_question(state, question)
 
+<<<<<<< Updated upstream
+=======
+    if normalized_question in {
+        "volume",
+        "volume de usuarios",
+        "usuarios",
+        "trafego",
+        "performance",
+        "performance financeira",
+        "financeira",
+        "receita",
+        "pedidos",
+        "receita e pedidos",
+    } and (
+        AGENT_AMBIGUOUS_METRIC_CLARIFICATION_PATTERN.search(
+            normalized_previous_ai_answer
+        )
+        or _previous_turn_opened_ambiguous_metric_clarification(state)
+    ):
+        return _merge_follow_up_with_previous_question(state, question)
+
+>>>>>>> Stashed changes
     return None
 
 
