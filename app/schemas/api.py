@@ -81,7 +81,7 @@ class QueryMetadata(BaseModel):
 class DebugError(BaseModel):
     """Structured debug error emitted by the graph or API."""
 
-    source: Literal["tool_executor", "insight_synthesizer", "api"] = Field(
+    source: Literal["agent", "tool_executor", "insight_synthesizer", "api"] = Field(
         description="Origem do erro tecnico capturado no fluxo."
     )
     message: str = Field(description="Mensagem tecnica resumida para diagnostico.")
@@ -97,6 +97,17 @@ class DebugError(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class AgentToolCall(BaseModel):
+    """Records a single tool_call emitted by the LLM agent node."""
+
+    tool_name: str = Field(description="Nome da tool escolhida pelo LLM.")
+    args: dict[str, Any] = Field(
+        description="Argumentos passados pelo LLM para a tool."
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class DebugInfo(BaseModel):
     """Optional diagnostics returned when the request asks for debug details."""
 
@@ -104,9 +115,23 @@ class DebugInfo(BaseModel):
         default=None,
         description="Pergunta efetivamente usada pelo fluxo apos merge de contexto.",
     )
-    router_decision: dict[str, Any] | None = Field(
+    router_intent: str | None = Field(
         default=None,
-        description="Decisao estruturada mais recente do roteador para a pergunta.",
+        description=(
+            "Intencao classificada pelo roteador: traffic_volume, channel_performance, "
+            "strategy_follow_up, diagnostic_follow_up, ambiguous_analytics ou out_of_scope."
+        ),
+    )
+    router_short_circuit: str | None = Field(
+        default=None,
+        description=(
+            "Motivo do short-circuit quando o fluxo nao chegou ao agente: "
+            "refusal_reason ou clarification_reason."
+        ),
+    )
+    agent_tool_calls: list[AgentToolCall] = Field(
+        default_factory=list,
+        description="Tool calls emitidas pelo LLM durante o turno atual, com os args reais.",
     )
     errors: list[DebugError] = Field(
         default_factory=list,

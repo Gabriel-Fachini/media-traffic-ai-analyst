@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 import json
+import re
+import unicodedata
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
@@ -21,11 +23,14 @@ from langgraph.types import Command
 from app.graph.llm import (
     LlmTimeoutError,
     build_analytics_llm,
+    build_tool_enabled_llm,
     is_llm_timeout_error,
 )
-from app.graph.prompts import FINAL_RESPONSE_SYSTEM_PROMPT
-from app.graph.prompts import DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT
-from app.graph.prompts import STRATEGY_FOLLOW_UP_SYSTEM_PROMPT
+from app.graph.prompts import (
+    DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT,
+    STRATEGY_FOLLOW_UP_SYSTEM_PROMPT,
+    build_conversation_system_prompt,
+)
 from app.graph.router import (
     EMPTY_QUESTION_MESSAGE,
     INVALID_DATES_MESSAGE,
@@ -33,8 +38,10 @@ from app.graph.router import (
     OUT_OF_SCOPE_MESSAGE,
     UNSUPPORTED_DIMENSION_MESSAGE,
     build_router_decision,
-    question_is_diagnostic_follow_up,
+    question_is_contextual_diagnostic_follow_up,
+    question_is_generic_contextual_follow_up,
     question_introduces_new_traffic_source,
+    question_is_diagnostic_follow_up,
     question_is_metric_clarification_follow_up,
     question_is_strategy_follow_up,
     question_contains_temporal_signal,
@@ -43,11 +50,23 @@ from app.graph.router import (
 from app.schemas.router import RouterDecision
 from app.graph.tools import get_analytics_tools
 from app.utils.config import Settings, get_settings
+
 TEMPORARY_LLM_FAILURE_MESSAGE = (
     "Nao consegui concluir a analise agora por uma falha temporaria. Tente novamente em instantes."
 )
 TEMPORARY_TOOL_FAILURE_MESSAGE = (
     "Nao consegui consultar os dados agora por uma falha temporaria. Tente novamente em instantes."
+)
+
+# Safety guard: max agent/tool iterations per turn to prevent infinite loops.
+_MAX_AGENT_ITERATIONS = 3
+AGENT_SCOPE_CLARIFICATION_PATTERN = re.compile(
+    r"volume total.*comparar por canal|comparar por canal.*volume total",
+    re.IGNORECASE,
+)
+AGENT_MONTH_SCOPE_CLARIFICATION_PATTERN = re.compile(
+    r"este mes ate hoje.*mes calendario completo|mes calendario completo.*este mes ate hoje",
+    re.IGNORECASE,
 )
 
 
@@ -126,6 +145,14 @@ def _resolve_effective_question(state: AnalyticsGraphState) -> str:
     return _resolve_question(state)
 
 
+def _normalize_loose_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    stripped = "".join(
+        character for character in normalized if not unicodedata.combining(character)
+    )
+    return re.sub(r"\s+", " ", stripped).strip().lower()
+
+
 def _collect_tool_messages(messages: list[AnyMessage]) -> list[ToolMessage]:
     return [message for message in messages if isinstance(message, ToolMessage)]
 
@@ -140,6 +167,23 @@ def _get_last_human_question(messages: list[AnyMessage]) -> str:
             question = _content_to_text(message.content).strip()
             if question:
                 return question
+    return ""
+
+
+def _get_last_prior_ai_answer(state: AnalyticsGraphState) -> str:
+    messages = list(state.get("messages", []))
+    turn_start_index = _resolve_turn_start_index(state)
+    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
+
+    for message in reversed(messages[:bounded_turn_start_index]):
+        if not isinstance(message, AIMessage):
+            continue
+        if message.tool_calls:
+            continue
+        answer = _content_to_text(message.content).strip()
+        if answer:
+            return answer
+
     return ""
 
 
@@ -273,10 +317,58 @@ def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
     return "\n\n".join(context_blocks)
 
 
+def _infer_follow_up_intent_from_previous_context(
+    *,
+    previous_router_decision: RouterDecision | None,
+    previous_ai_answer: str,
+) -> Literal["strategy_follow_up", "diagnostic_follow_up"] | None:
+    if previous_router_decision is not None:
+        if previous_router_decision.intent == "strategy_follow_up":
+            return "strategy_follow_up"
+        if previous_router_decision.intent == "diagnostic_follow_up":
+            return "diagnostic_follow_up"
+
+    normalized_previous_answer = _normalize_loose_text(previous_ai_answer)
+    if not normalized_previous_answer:
+        return None
+
+    diagnostic_cues = (
+        "diagnostic",
+        "hipotese",
+        "explica",
+        "explicar",
+        "leitura mais diagnostica",
+        "melhor ou pior",
+        "abaixo de",
+        "acima de",
+        "comparar com os outros",
+    )
+    if any(cue in normalized_previous_answer for cue in diagnostic_cues):
+        return "diagnostic_follow_up"
+
+    strategy_cues = (
+        "acoes",
+        "acao",
+        "plano",
+        "priorizar",
+        "recomend",
+        "sugest",
+        "proximo passo",
+        "melhorar",
+        "fortalecer",
+    )
+    if any(cue in normalized_previous_answer for cue in strategy_cues):
+        return "strategy_follow_up"
+
+    return None
+
+
 def _resolve_follow_up_intent(
     question: str,
     *,
     has_prior_context: bool,
+    previous_router_decision: RouterDecision | None,
+    previous_ai_answer: str,
 ) -> Literal["strategy_follow_up", "diagnostic_follow_up"] | None:
     if not has_prior_context:
         return None
@@ -287,11 +379,125 @@ def _resolve_follow_up_intent(
     if question_is_diagnostic_follow_up(question):
         return "diagnostic_follow_up"
 
+    if question_is_contextual_diagnostic_follow_up(question):
+        return "diagnostic_follow_up"
+
+    if question_is_generic_contextual_follow_up(question):
+        inferred_intent = _infer_follow_up_intent_from_previous_context(
+            previous_router_decision=previous_router_decision,
+            previous_ai_answer=previous_ai_answer,
+        )
+        if inferred_intent is not None:
+            return inferred_intent
+        return "strategy_follow_up"
+
     return None
 
 
-def _serialize_tool_result(result: Any) -> str:
-    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
+def _question_changes_follow_up_traffic_scope(
+    question: str,
+    *,
+    previous_router_decision: RouterDecision | None,
+    follow_up_intent: Literal["strategy_follow_up", "diagnostic_follow_up"] | None,
+) -> bool:
+    if previous_router_decision is None:
+        return False
+
+    previous_traffic_source = previous_router_decision.normalized_params.traffic_source
+    if follow_up_intent is not None and previous_traffic_source is None:
+        return False
+
+    return question_introduces_new_traffic_source(
+        question,
+        previous_traffic_source=previous_traffic_source,
+    )
+
+
+def _build_router_guidance_message(
+    router_decision: RouterDecision | None,
+    *,
+    resolved_question: str,
+) -> str | None:
+    if router_decision is None:
+        return None
+
+    normalized_params = router_decision.normalized_params
+    guidance_lines = [
+        "Contexto estruturado do router para este turno:",
+        f"- pergunta canonica: {resolved_question or '(vazia)'}",
+        f"- intent: {router_decision.intent}",
+        f"- traffic_source: {normalized_params.traffic_source or 'agregado/todos os canais'}",
+        (
+            f"- start_date: {normalized_params.start_date.isoformat()}"
+            if normalized_params.start_date is not None
+            else "- start_date: nao resolvida"
+        ),
+        (
+            f"- end_date: {normalized_params.end_date.isoformat()}"
+            if normalized_params.end_date is not None
+            else "- end_date: nao resolvida"
+        ),
+    ]
+
+    if (
+        not router_decision.needs_clarification
+        and router_decision.refusal_reason is None
+        and router_decision.intent in {"traffic_volume", "channel_performance"}
+    ):
+        guidance_lines.append(
+            "- o router ja resolveu a intencao e os parametros necessarios; nao peca nova clarificacao sobre periodo, metrica ou comparacao por canal"
+        )
+
+    return "\n".join(guidance_lines)
+
+
+def _merge_follow_up_with_previous_question(
+    state: AnalyticsGraphState,
+    question: str,
+) -> str | None:
+    previous_question = _get_last_human_question(list(state.get("messages", [])))
+    if not previous_question:
+        return None
+
+    return f"{previous_question.rstrip()} {question.strip()}".strip()
+
+
+def _build_agent_clarification_follow_up_question(
+    state: AnalyticsGraphState,
+    question: str,
+) -> str | None:
+    previous_ai_answer = _get_last_prior_ai_answer(state)
+    if not previous_ai_answer:
+        return None
+
+    normalized_previous_ai_answer = _normalize_loose_text(previous_ai_answer)
+    normalized_question = _normalize_loose_text(question)
+    if not normalized_question:
+        return None
+
+    if AGENT_SCOPE_CLARIFICATION_PATTERN.search(normalized_previous_ai_answer):
+        if normalized_question in {
+            "total",
+            "volume total",
+            "comparar",
+            "comparacao",
+            "comparar por canal",
+            "por canal",
+            "canal",
+        }:
+            return _merge_follow_up_with_previous_question(state, question)
+
+    if AGENT_MONTH_SCOPE_CLARIFICATION_PATTERN.search(normalized_previous_ai_answer):
+        if normalized_question in {
+            "ate hoje",
+            "este mes ate hoje",
+            "mes calendario completo",
+            "mes completo",
+            "quero o mes calendario completo",
+        }:
+            return _merge_follow_up_with_previous_question(state, question)
+
+    return None
 
 
 def _build_temporary_failure_ai_message() -> AIMessage:
@@ -319,51 +525,23 @@ def _router_decision_short_circuits(router_decision: RouterDecision) -> bool:
     )
 
 
-def _resolve_expected_tool_name(router_decision: RouterDecision | None) -> str | None:
-    if router_decision is None:
-        return None
-    if router_decision.intent == "traffic_volume":
-        return "traffic_volume_analyzer"
-    if router_decision.intent == "channel_performance":
-        return "channel_performance_analyzer"
-    return None
-
-
-def _build_router_tool_args(router_decision: RouterDecision) -> dict[str, Any]:
-    normalized_params = router_decision.normalized_params
-    return {
-        "traffic_source": normalized_params.traffic_source,
-        "start_date": (
-            normalized_params.start_date.isoformat()
-            if normalized_params.start_date is not None
-            else None
-        ),
-        "end_date": (
-            normalized_params.end_date.isoformat()
-            if normalized_params.end_date is not None
-            else None
-        ),
-    }
-
-
 def _resolve_router_turn(
     state: AnalyticsGraphState,
     question: str,
 ) -> tuple[str, RouterDecision]:
     router_decision = build_router_decision(question)
     previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
-    follow_up_changes_traffic_source = (
-        previous_router_decision is not None
-        and question_introduces_new_traffic_source(
-            question,
-            previous_traffic_source=(
-                previous_router_decision.normalized_params.traffic_source
-            ),
-        )
-    )
+    previous_ai_answer = _get_last_prior_ai_answer(state)
     follow_up_intent = _resolve_follow_up_intent(
         question,
         has_prior_context=_has_prior_successful_tool_context(state),
+        previous_router_decision=previous_router_decision,
+        previous_ai_answer=previous_ai_answer,
+    )
+    follow_up_changes_traffic_source = _question_changes_follow_up_traffic_scope(
+        question,
+        previous_router_decision=previous_router_decision,
+        follow_up_intent=follow_up_intent,
     )
     if (
         (
@@ -383,6 +561,21 @@ def _resolve_router_turn(
                 normalized_params=router_decision.normalized_params,
             ),
         )
+
+    merged_agent_clarification_question = _build_agent_clarification_follow_up_question(
+        state,
+        question,
+    )
+    if (
+        merged_agent_clarification_question is not None
+        and not follow_up_changes_traffic_source
+    ):
+        merged_router_decision = build_router_decision(merged_agent_clarification_question)
+        if (
+            merged_router_decision.intent != "out_of_scope"
+            or merged_router_decision.needs_clarification
+        ):
+            return merged_agent_clarification_question, merged_router_decision
 
     should_merge_temporal_follow_up = (
         previous_router_decision is not None
@@ -436,20 +629,34 @@ def _resolve_router_turn(
     return merged_question, merged_router_decision
 
 
+def _count_agent_iterations_in_turn(state: AnalyticsGraphState) -> int:
+    """Count how many times the agent node has run in the current turn."""
+    current_turn_messages = _get_current_turn_messages(state)
+    return sum(
+        1 for msg in current_turn_messages
+        if isinstance(msg, AIMessage) and msg.tool_calls
+    )
+
+
 def build_analytics_graph(
     settings: Settings | None = None,
     *,
+    agent_llm: Any | None = None,
     response_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
     checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
-    tools_by_name = {tool.name: tool for tool in analytics_tools}
-    synthesis_llm = response_llm or build_analytics_llm(settings)
+    # agent_llm: LLM with tools bound — drives tool calling decisions.
+    # response_llm: plain LLM (no tools) — used only for follow-up synthesis.
+    resolved_agent_llm = agent_llm or build_tool_enabled_llm(settings)
+    resolved_response_llm = response_llm or build_analytics_llm(settings)
+    tools_by_name: dict[str, BaseTool] = {tool.name: tool for tool in analytics_tools}
+    agent_system_prompt = build_conversation_system_prompt()
 
     def router_node(
         state: AnalyticsGraphState,
-    ) -> Command[Literal["tool_executor", "insight_synthesizer"]]:
+    ) -> Command[Literal["agent", "scope_guard", "insight_synthesizer"]]:
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
         injected_messages = _build_turn_question_messages(state)
@@ -465,119 +672,140 @@ def build_analytics_graph(
         if injected_messages:
             state_update["messages"] = injected_messages
 
+        # Follow-ups (strategy/diagnostic) go straight to synthesis, no new tool calls.
         if router_decision.intent in {
             "strategy_follow_up",
             "diagnostic_follow_up",
         }:
             return Command(update=state_update, goto="insight_synthesizer")
 
+        # Short-circuits (refusal, clarification) bypass LLM entirely.
         if _router_decision_short_circuits(router_decision):
             state_update["final_answer"] = (
                 router_decision.response_message or EMPTY_QUESTION_MESSAGE
             )
-            return Command(update=state_update, goto="insight_synthesizer")
+            return Command(update=state_update, goto="scope_guard")
 
-        return Command(update=state_update, goto="tool_executor")
+        # Analytics intents (traffic_volume, channel_performance) go to the LLM agent.
+        return Command(update=state_update, goto="agent")
 
-    def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
+    def agent_node(
+        state: AnalyticsGraphState,
+    ) -> Command[Literal["tool_executor", "__end__"]]:
+        """LLM agent that decides which tool to call, then synthesizes the final answer."""
+        # Safety guard: prevent runaway loops.
+        iterations = _count_agent_iterations_in_turn(state)
+        if iterations >= _MAX_AGENT_ITERATIONS:
+            current_turn_messages = _get_current_turn_messages(state)
+            tools_used = _collect_tools_used(current_turn_messages)
+            return Command(
+                update={
+                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+                    "tools_used": tools_used,
+                    "debug_errors": [
+                        _build_debug_error(
+                            "agent",
+                            message=(
+                                f"Limite de {_MAX_AGENT_ITERATIONS} iteracoes atingido "
+                                "no loop agent/tool."
+                            ),
+                        )
+                    ],
+                },
+                goto="__end__",
+            )
+
+        # Build the messages for this agent invocation: system + current turn history.
+        # Always use the resolved_question (which may be a merged clarification) as the
+        # first HumanMessage so the LLM receives the full canonical context, not just
+        # the raw last user input.
+        current_turn_messages = _get_current_turn_messages(state)
+        resolved_question = _resolve_effective_question(state)
         router_decision = _deserialize_router_decision(state.get("router_decision"))
+        if resolved_question:
+            # Replace or prepend the first HumanMessage with the resolved question.
+            non_human_prefix: list[AnyMessage] = []
+            rest_of_turn: list[AnyMessage] = list(current_turn_messages)
+            if rest_of_turn and isinstance(rest_of_turn[0], HumanMessage):
+                rest_of_turn = rest_of_turn[1:]
+            agent_turn_messages: list[AnyMessage] = (
+                [HumanMessage(content=resolved_question)] + non_human_prefix + rest_of_turn
+            )
+        else:
+            agent_turn_messages = list(current_turn_messages)
 
-        tool_messages: list[ToolMessage] = []
-        expected_tool_name = _resolve_expected_tool_name(router_decision)
-
-        if router_decision is None or expected_tool_name is None:
-            return {
-                "messages": [
-                    ToolMessage(
-                        tool_call_id="router-decision-missing",
-                        name="unknown",
-                        status="error",
-                        content=(
-                            "Nao foi possivel resolver uma tool a partir da decisao "
-                            "estruturada do roteador."
-                        ),
-                    )
-                ],
-                "debug_errors": [
-                    _build_debug_error(
-                        "tool_executor",
-                        message=(
-                            "Nao foi possivel mapear a decisao do roteador para uma "
-                            "tool executavel."
-                        ),
-                    )
-                ],
-            }
-
-        resolved_tool_args = _build_router_tool_args(router_decision)
-        tool = tools_by_name.get(expected_tool_name)
-
-        if tool is None:
-            return {
-                "messages": [
-                    ToolMessage(
-                        tool_call_id=expected_tool_name,
-                        name=expected_tool_name,
-                        status="error",
-                        content=(
-                            "A tool esperada pela decisao do roteador nao esta "
-                            f"registrada: {expected_tool_name}."
-                        ),
-                    )
-                ],
-                "debug_errors": [
-                    _build_debug_error(
-                        "tool_executor",
-                        message=(
-                            "A tool esperada pela decisao do roteador nao esta registrada."
-                        ),
-                        tool_name=expected_tool_name,
-                    )
-                ],
-            }
+        llm_input = [SystemMessage(content=agent_system_prompt)]
+        router_guidance = _build_router_guidance_message(
+            router_decision,
+            resolved_question=resolved_question,
+        )
+        if router_guidance is not None:
+            llm_input.append(SystemMessage(content=router_guidance))
+        llm_input += agent_turn_messages
 
         try:
-            result = tool.invoke(resolved_tool_args)
-            tool_messages.append(
-                ToolMessage(
-                    tool_call_id=expected_tool_name,
-                    name=expected_tool_name,
-                    content=_serialize_tool_result(result),
-                    artifact=result,
-                )
-            )
+            response = cast(AIMessage, resolved_agent_llm.invoke(llm_input))
         except Exception as exc:
-            tool_messages.append(
-                ToolMessage(
-                    tool_call_id=expected_tool_name,
-                    name=expected_tool_name,
-                    status="error",
-                    content=(
-                        f"Falha temporaria ao executar {expected_tool_name}: "
-                        f"{_stringify_exception(exc)}"
-                    ),
-                )
+            if is_llm_timeout_error(exc):
+                raise LlmTimeoutError(
+                    "Tempo limite excedido no nó agente.",
+                    source="agent",
+                    error_type=type(exc).__name__,
+                    debug_message=_stringify_exception(exc),
+                ) from exc
+            current_turn_messages_for_error = _get_current_turn_messages(state)
+            tools_used = _collect_tools_used(current_turn_messages_for_error)
+            return Command(
+                update={
+                    "messages": [_build_temporary_failure_ai_message()],
+                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+                    "tools_used": tools_used,
+                    "debug_errors": [
+                        _build_debug_error(
+                            "agent",
+                            message=_stringify_exception(exc),
+                            error_type=type(exc).__name__,
+                        )
+                    ],
+                },
+                goto="__end__",
             )
-            return {
-                "messages": tool_messages,
-                "debug_errors": [
-                    _build_debug_error(
-                        "tool_executor",
-                        message=_stringify_exception(exc),
-                        error_type=type(exc).__name__,
-                        tool_name=expected_tool_name,
-                    )
-                ],
-            }
 
-        return {"messages": tool_messages}
+        # If the LLM decided to call tools, store the AIMessage and route to executor.
+        if response.tool_calls:
+            return Command(
+                update={"messages": [response]},
+                goto="tool_executor",
+            )
+
+        # No tool calls: the LLM produced the final answer directly.
+        current_turn_messages_final = _get_current_turn_messages(state)
+        # Include the new response in tool collection.
+        all_turn_messages = list(current_turn_messages_final) + [response]
+        tools_used = _collect_tools_used(all_turn_messages)
+        final_text = _content_to_text(response.content).strip()
+        return Command(
+            update={
+                "messages": [response],
+                "final_answer": final_text,
+                "tools_used": tools_used,
+            },
+            goto="__end__",
+        )
+
+    def scope_guard_node(state: AnalyticsGraphState) -> dict[str, Any]:
+        """Emits the short-circuit answer set by the router. No LLM involved."""
+        preset_answer = state.get("final_answer", "")
+        return {
+            "final_answer": preset_answer,
+            "tools_used": [],
+        }
 
     def insight_synthesizer_node(state: AnalyticsGraphState) -> dict[str, Any]:
+        """Synthesizes strategic/diagnostic follow-up answers using a plain LLM."""
         current_turn_messages = _get_current_turn_messages(state)
         router_decision = _deserialize_router_decision(state.get("router_decision"))
         tools_used = _collect_tools_used(current_turn_messages)
-        preset_answer = state.get("final_answer")
-        tool_messages = _collect_tool_messages(current_turn_messages)
 
         if router_decision is not None and router_decision.intent in {
             "strategy_follow_up",
@@ -594,7 +822,7 @@ def build_analytics_graph(
             try:
                 synthesized_response = cast(
                     AIMessage,
-                    synthesis_llm.invoke(
+                    resolved_response_llm.invoke(
                         [
                             SystemMessage(
                                 content=(
@@ -639,77 +867,113 @@ def build_analytics_graph(
                 "tools_used": tools_used,
             }
 
-        if preset_answer and not tool_messages:
-            return {
-                "final_answer": preset_answer,
-                "tools_used": tools_used,
-            }
-
-        if any(message.status == "error" for message in tool_messages):
-            return {
-                "final_answer": TEMPORARY_TOOL_FAILURE_MESSAGE,
-                "tools_used": tools_used,
-            }
-
-        if tool_messages:
-            question = _resolve_effective_question(state)
-            tool_context = "\n\n".join(
-                f"Tool: {message.name}\nResultado:\n{_content_to_text(message.content)}"
-                for message in tool_messages
-            )
-            try:
-                synthesized_response = cast(
-                    AIMessage,
-                    synthesis_llm.invoke(
-                        [
-                            SystemMessage(content=FINAL_RESPONSE_SYSTEM_PROMPT),
-                            HumanMessage(
-                                content=(
-                                    f"Pergunta original:\n{question}\n\n"
-                                    f"Resultados estruturados:\n{tool_context}"
-                                )
-                            ),
-                        ]
-                    ),
-                )
-            except Exception as exc:
-                if is_llm_timeout_error(exc):
-                    raise LlmTimeoutError(
-                        "Tempo limite excedido ao sintetizar a resposta final.",
-                        source="insight_synthesizer",
-                        error_type=type(exc).__name__,
-                        debug_message=_stringify_exception(exc),
-                    ) from exc
-                return {
-                    "messages": [_build_temporary_failure_ai_message()],
-                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-                    "tools_used": tools_used,
-                    "debug_errors": [
-                        _build_debug_error(
-                            "insight_synthesizer",
-                            message=_stringify_exception(exc),
-                            error_type=type(exc).__name__,
-                        )
-                    ],
-                }
-            return {
-                "messages": [synthesized_response],
-                "final_answer": _content_to_text(synthesized_response.content).strip(),
-                "tools_used": tools_used,
-            }
-
         return {
-            "final_answer": TEMPORARY_TOOL_FAILURE_MESSAGE,
+            "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
             "tools_used": tools_used,
         }
 
     graph = StateGraph(AnalyticsGraphState)
+    def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
+        """Execute all tool_calls from the last AIMessage and return ToolMessages."""
+        messages = list(state.get("messages", []))
+        # Find the last AIMessage that contains tool_calls.
+        last_ai_message: AIMessage | None = None
+        for message in reversed(messages):
+            if isinstance(message, AIMessage) and message.tool_calls:
+                last_ai_message = message
+                break
+
+        if last_ai_message is None:
+            return {
+                "messages": [
+                    ToolMessage(
+                        tool_call_id="no-tool-calls",
+                        name="unknown",
+                        status="error",
+                        content="Nenhum tool_call encontrado na ultima mensagem do agente.",
+                    )
+                ],
+                "debug_errors": [
+                    _build_debug_error(
+                        "tool_executor",
+                        message="Nenhum tool_call encontrado na ultima AIMessage.",
+                    )
+                ],
+            }
+
+        tool_messages: list[ToolMessage] = []
+        debug_errors: list[dict[str, Any]] = []
+
+        for tool_call in last_ai_message.tool_calls:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+            tool_call_id = tool_call.get("id") or tool_name
+            tool = tools_by_name.get(tool_name)
+
+            if tool is None:
+                tool_messages.append(
+                    ToolMessage(
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                        status="error",
+                        content=f"Tool nao registrada: {tool_name}.",
+                    )
+                )
+                debug_errors.append(
+                    _build_debug_error(
+                        "tool_executor",
+                        message=f"Tool nao registrada: {tool_name}.",
+                        tool_name=tool_name,
+                    )
+                )
+                continue
+
+            try:
+                result = tool.invoke(tool_args)
+                tool_messages.append(
+                    ToolMessage(
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                        content=json.dumps(result, ensure_ascii=False, indent=2, default=str),
+                        artifact=result,
+                    )
+                )
+            except Exception as exc:
+                tool_messages.append(
+                    ToolMessage(
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                        status="error",
+                        content=(
+                            f"Falha ao executar {tool_name}: {_stringify_exception(exc)}"
+                        ),
+                    )
+                )
+                debug_errors.append(
+                    _build_debug_error(
+                        "tool_executor",
+                        message=_stringify_exception(exc),
+                        error_type=type(exc).__name__,
+                        tool_name=tool_name,
+                    )
+                )
+
+        result_state: dict[str, Any] = {"messages": tool_messages}
+        if debug_errors:
+            result_state["debug_errors"] = debug_errors
+        return result_state
+
+    graph = StateGraph(AnalyticsGraphState)
     graph.add_node("router", router_node)
+    graph.add_node("agent", agent_node)
     graph.add_node("tool_executor", tool_executor_node)
+    graph.add_node("scope_guard", scope_guard_node)
     graph.add_node("insight_synthesizer", insight_synthesizer_node)
 
     graph.add_edge(START, "router")
-    graph.add_edge("tool_executor", "insight_synthesizer")
+    # tool_executor loops back to agent after executing the tool call.
+    graph.add_edge("tool_executor", "agent")
+    graph.add_edge("scope_guard", END)
     graph.add_edge("insight_synthesizer", END)
 
     return graph.compile(checkpointer=checkpointer)

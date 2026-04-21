@@ -1,6 +1,7 @@
 """Pydantic schemas for API and tool contracts."""
 
 from app.schemas.api import (
+    AgentToolCall,
     DebugError,
     DebugInfo,
     ErrorResponse,
@@ -33,4 +34,5 @@ __all__ = [
     "TrafficVolumeRow",
     "DebugError",
     "DebugInfo",
+    "AgentToolCall",
 ]

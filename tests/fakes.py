@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool, StructuredTool
@@ -119,7 +120,104 @@ class FakeAnalyticsTools:
 
 
 @dataclass
+class FakeAgentLLM:
+    """Simulates LLM-driven tool calling for deterministic graph tests.
+
+    First call per turn: emits an AIMessage with tool_calls based on the
+    question content (simulating the LLM deciding which tool to use).
+    Subsequent calls in the same turn (after tool results arrive): emits
+    a plain AIMessage with the synthesized answer text.
+    """
+
+    prompts: list[str] = field(default_factory=list)
+    _calls_in_session: int = field(default=0, init=False, repr=False)
+
+    def _pick_tool_name(self, question_text: str) -> str:
+        q = question_text.lower()
+        if any(
+            kw in q
+            for kw in ("receita", "pedido", "revenue", "performance", "melhor", "ranking")
+        ):
+            return "channel_performance_analyzer"
+        return "traffic_volume_analyzer"
+
+    def _pick_traffic_source(self, question_text: str) -> str | None:
+        q = question_text.lower()
+        channel_map = {
+            "search": "Search",
+            "organic": "Organic",
+            "facebook": "Facebook",
+            "instagram": "Instagram",
+        }
+        for token, canonical in channel_map.items():
+            if token in q:
+                return canonical
+        return None
+
+    def _has_tool_message(self, messages: list[Any]) -> bool:
+        from langchain_core.messages import ToolMessage
+
+        return any(isinstance(m, ToolMessage) for m in messages)
+
+    def invoke(self, messages: list[Any]) -> AIMessage:
+        self._calls_in_session += 1
+        last_content = _extract_text(messages[-1].content) if messages else ""
+        self.prompts.append(last_content)
+
+        # If there's already a ToolMessage in the conversation, the LLM is
+        # being called after tool execution — produce the final answer.
+        if self._has_tool_message(messages):
+            # Find the tool name from the ToolMessage.
+            from langchain_core.messages import ToolMessage
+
+            tool_name = "unknown"
+            for msg in reversed(messages):
+                if isinstance(msg, ToolMessage) and msg.name:
+                    tool_name = msg.name
+                    break
+            # Find the original human question.
+            from langchain_core.messages import HumanMessage
+
+            question = ""
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    question = _extract_text(msg.content)
+                    break
+            return AIMessage(content=f"SYNTH::{tool_name}::{question}")
+
+        # First call: emit tool_calls to trigger tool execution.
+        # Concatenate ALL human messages to capture full context across turns.
+        from langchain_core.messages import HumanMessage
+
+        all_human_text = " ".join(
+            _extract_text(msg.content)
+            for msg in messages
+            if isinstance(msg, HumanMessage)
+        )
+        tool_name = self._pick_tool_name(all_human_text)
+        traffic_source = self._pick_traffic_source(all_human_text)
+        # Build a minimal tool_call that ToolNode can execute.
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": tool_name,
+                    "args": {
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-01-31",
+                        "traffic_source": traffic_source,
+                    },
+                    "id": str(uuid4()),
+                    "type": "tool_call",
+                }
+            ],
+        )
+
+
+@dataclass
 class FakeSynthesisLLM:
+    """Plain LLM fake used by the insight_synthesizer (follow-ups only)."""
+
     prompts: list[str] = field(default_factory=list)
 
     def invoke(self, messages: list[Any]) -> AIMessage:
@@ -151,16 +249,24 @@ class FakeSynthesisLLM:
 @dataclass
 class DeterministicGraphBundle:
     graph: Any
-    llm: FakeSynthesisLLM
+    agent_llm: FakeAgentLLM
+    synthesis_llm: FakeSynthesisLLM
     tools: FakeAnalyticsTools
 
 
 def build_deterministic_graph_bundle() -> DeterministicGraphBundle:
-    fake_llm = FakeSynthesisLLM()
+    fake_agent_llm = FakeAgentLLM()
+    fake_synthesis_llm = FakeSynthesisLLM()
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
-        response_llm=fake_llm,
+        agent_llm=fake_agent_llm,
+        response_llm=fake_synthesis_llm,
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),
     )
-    return DeterministicGraphBundle(graph=graph, llm=fake_llm, tools=fake_tools)
+    return DeterministicGraphBundle(
+        graph=graph,
+        agent_llm=fake_agent_llm,
+        synthesis_llm=fake_synthesis_llm,
+        tools=fake_tools,
+    )

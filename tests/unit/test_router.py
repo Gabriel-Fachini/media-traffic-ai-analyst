@@ -151,6 +151,24 @@ def test_router_prioritizes_invalid_dates_when_detected() -> None:
             None,
             None,
         ),
+        (
+            "Usuarios nos ultimos 7 dias",
+            "traffic_volume",
+            None,
+            None,
+            date(2026, 4, 14),
+            date(2026, 4, 20),
+            None,
+        ),
+        (
+            "Usuarios ontem",
+            "traffic_volume",
+            None,
+            None,
+            date(2026, 4, 19),
+            date(2026, 4, 19),
+            None,
+        ),
     ],
 )
 def test_router_resolves_semantic_scenarios(
@@ -172,3 +190,68 @@ def test_router_resolves_semantic_scenarios(
     if expected_message_fragment is not None:
         assert decision.response_message is not None
         assert expected_message_fragment in decision.response_message
+
+
+@pytest.mark.parametrize(
+    (
+        "question",
+        "expected_intent",
+        "expected_clarification_reason",
+        "expected_start_date",
+        "expected_end_date",
+    ),
+    [
+        (
+            "Receita por canal entre 2024-01-01 e 2024-03-31",
+            "channel_performance",
+            None,
+            date(2024, 1, 1),
+            date(2024, 3, 31),
+        ),
+        (
+            "Receita por canal no ultimo mes",
+            "channel_performance",
+            None,
+            date(2026, 3, 1),
+            date(2026, 3, 31),
+        ),
+        (
+            "Qual dos canais tem a melhor performance entre 2024-01-01 e 2024-03-31? E por que?",
+            "channel_performance",
+            None,
+            date(2024, 1, 1),
+            date(2024, 3, 31),
+        ),
+        (
+            "Por que Organic ficou abaixo de Search entre 2024-01-01 e 2024-03-31?",
+            "ambiguous_analytics",
+            "ambiguous_metric",
+            date(2024, 1, 1),
+            date(2024, 3, 31),
+        ),
+    ],
+)
+def test_router_avoids_false_unsupported_dimension_refusals(
+    question: str,
+    expected_intent: str,
+    expected_clarification_reason: str | None,
+    expected_start_date: date,
+    expected_end_date: date,
+) -> None:
+    decision = build_router_decision(question, reference_date=REFERENCE_DATE)
+
+    assert decision.intent == expected_intent
+    assert decision.refusal_reason is None
+    assert decision.clarification_reason == expected_clarification_reason
+    assert decision.normalized_params.start_date == expected_start_date
+    assert decision.normalized_params.end_date == expected_end_date
+
+
+def test_router_keeps_unsupported_dimension_for_real_dimension_request() -> None:
+    decision = build_router_decision(
+        "Qual foi a receita por campanha entre 2024-01-01 e 2024-01-31?",
+        reference_date=REFERENCE_DATE,
+    )
+
+    assert decision.intent == "out_of_scope"
+    assert decision.refusal_reason == "unsupported_dimension"
