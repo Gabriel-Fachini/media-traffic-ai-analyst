@@ -84,6 +84,27 @@ class AnalyticsGraphState(TypedDict, total=False):
     debug_errors: list[dict[str, Any]]
 
 
+class ToolExecutionError(RuntimeError):
+    """Raised when the graph cannot complete a tool call safely."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: str = "tool_executor",
+        error_type: str | None = None,
+        tool_name: str | None = None,
+        debug_message: str | None = None,
+        resolved_question: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.source = source
+        self.error_type = error_type
+        self.tool_name = tool_name
+        self.debug_message = debug_message or message
+        self.resolved_question = resolved_question
+
+
 def _content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content
@@ -964,6 +985,7 @@ def build_analytics_graph(
     def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
         """Execute all tool_calls from the last AIMessage and return ToolMessages."""
         messages = list(state.get("messages", []))
+        resolved_question = _resolve_effective_question(state)
         # Find the last AIMessage that contains tool_calls.
         last_ai_message: AIMessage | None = None
         for message in reversed(messages):
@@ -972,22 +994,12 @@ def build_analytics_graph(
                 break
 
         if last_ai_message is None:
-            return {
-                "messages": [
-                    ToolMessage(
-                        tool_call_id="no-tool-calls",
-                        name="unknown",
-                        status="error",
-                        content="Nenhum tool_call encontrado na ultima mensagem do agente.",
-                    )
-                ],
-                "debug_errors": [
-                    _build_debug_error(
-                        "tool_executor",
-                        message="Nenhum tool_call encontrado na ultima AIMessage.",
-                    )
-                ],
-            }
+            raise ToolExecutionError(
+                TEMPORARY_TOOL_FAILURE_MESSAGE,
+                error_type="MissingToolCallError",
+                debug_message="Nenhum tool_call encontrado na ultima AIMessage.",
+                resolved_question=resolved_question,
+            )
 
         tool_messages: list[ToolMessage] = []
         debug_errors: list[dict[str, Any]] = []
@@ -999,22 +1011,13 @@ def build_analytics_graph(
             tool = tools_by_name.get(tool_name)
 
             if tool is None:
-                tool_messages.append(
-                    ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
-                        status="error",
-                        content=f"Tool nao registrada: {tool_name}.",
-                    )
+                raise ToolExecutionError(
+                    TEMPORARY_TOOL_FAILURE_MESSAGE,
+                    error_type="UnknownToolError",
+                    tool_name=tool_name,
+                    debug_message=f"Tool nao registrada: {tool_name}.",
+                    resolved_question=resolved_question,
                 )
-                debug_errors.append(
-                    _build_debug_error(
-                        "tool_executor",
-                        message=f"Tool nao registrada: {tool_name}.",
-                        tool_name=tool_name,
-                    )
-                )
-                continue
 
             try:
                 result = tool.invoke(tool_args)
@@ -1027,24 +1030,13 @@ def build_analytics_graph(
                     )
                 )
             except Exception as exc:
-                tool_messages.append(
-                    ToolMessage(
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
-                        status="error",
-                        content=(
-                            f"Falha ao executar {tool_name}: {_stringify_exception(exc)}"
-                        ),
-                    )
-                )
-                debug_errors.append(
-                    _build_debug_error(
-                        "tool_executor",
-                        message=_stringify_exception(exc),
-                        error_type=type(exc).__name__,
-                        tool_name=tool_name,
-                    )
-                )
+                raise ToolExecutionError(
+                    TEMPORARY_TOOL_FAILURE_MESSAGE,
+                    error_type=type(exc).__name__,
+                    tool_name=tool_name,
+                    debug_message=_stringify_exception(exc),
+                    resolved_question=resolved_question,
+                ) from exc
 
         result_state: dict[str, Any] = {"messages": tool_messages}
         if debug_errors:
@@ -1107,6 +1099,7 @@ __all__ = [
     "OUT_OF_SCOPE_MESSAGE",
     "TEMPORARY_LLM_FAILURE_MESSAGE",
     "TEMPORARY_TOOL_FAILURE_MESSAGE",
+    "ToolExecutionError",
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "build_analytics_graph",
     "get_persistent_analytics_graph",

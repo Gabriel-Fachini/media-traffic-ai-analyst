@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
+from app.clients.bigquery_client import BigQueryClientError
 from app.graph.workflow import (
     AnalyticsGraphState,
     MISSING_DATES_MESSAGE,
+    TEMPORARY_TOOL_FAILURE_MESSAGE,
+    ToolExecutionError,
     UNSUPPORTED_DIMENSION_MESSAGE,
     build_analytics_graph,
     invoke_analytics_graph,
 )
+from app.schemas.tools import ChannelPerformanceInput
 from app.schemas.router import RouterDecision
 from tests.fakes import (
     DeterministicGraphBundle,
@@ -125,6 +130,47 @@ def test_graph_llm_decides_to_call_channel_performance_tool(
     assert final_answer.startswith("SYNTH::channel_performance_analyzer::")
     assert len(graph_bundle.tools.calls) == 1
     assert graph_bundle.tools.calls[0].tool_name == "channel_performance_analyzer"
+
+
+def test_graph_promotes_tool_failures_as_structured_execution_errors() -> None:
+    agent_llm = FakeAgentLLM()
+
+    def raise_bigquery_failure(
+        start_date: object,
+        end_date: object,
+        traffic_source: str | None = None,
+    ) -> dict[str, Any]:
+        del start_date, end_date, traffic_source
+        raise BigQueryClientError("Falha simulada no BigQuery.")
+
+    graph = build_analytics_graph(
+        agent_llm=agent_llm,
+        tools=(
+            StructuredTool.from_function(
+                func=raise_bigquery_failure,
+                name="channel_performance_analyzer",
+                description="Failing channel performance analyzer for error propagation tests.",
+                args_schema=ChannelPerformanceInput,
+            ),
+        ),
+        checkpointer=MemorySaver(),
+    )
+
+    with pytest.raises(ToolExecutionError) as exc_info:
+        invoke_analytics_graph(
+            "Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?",
+            graph=graph,
+            thread_id="tool-error-thread",
+        )
+
+    exc = exc_info.value
+    assert str(exc) == TEMPORARY_TOOL_FAILURE_MESSAGE
+    assert exc.error_type == "BigQueryClientError"
+    assert exc.tool_name == "channel_performance_analyzer"
+    assert exc.resolved_question == (
+        "Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?"
+    )
+    assert exc.debug_message == "Falha simulada no BigQuery."
 
 
 def test_graph_short_circuits_missing_dates_without_tool_execution(

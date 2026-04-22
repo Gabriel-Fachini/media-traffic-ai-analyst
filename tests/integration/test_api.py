@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.graph.llm import LlmTimeoutError
+from app.graph.workflow import TEMPORARY_TOOL_FAILURE_MESSAGE, ToolExecutionError
 from app.main import LLM_TIMEOUT_ERROR_MESSAGE, app, get_query_graph
 from app.schemas.api import ErrorResponse, QueryResponse
 from tests.fakes import DeterministicGraphBundle, build_deterministic_graph_bundle
@@ -157,6 +158,54 @@ def test_query_returns_structured_timeout_error_when_graph_times_out() -> None:
         "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"
     )
     assert body.debug.errors[0].error_type == "SimulatedTimeoutError"
+
+
+def test_query_returns_structured_tool_error_when_graph_tool_execution_fails() -> None:
+    original_overrides = dict(app.dependency_overrides)
+
+    class ToolFailureGraph:
+        def invoke(
+            self,
+            state: dict[str, Any],
+            config: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            del state, config
+            raise ToolExecutionError(
+                TEMPORARY_TOOL_FAILURE_MESSAGE,
+                error_type="BigQueryClientError",
+                tool_name="channel_performance_analyzer",
+                debug_message="Falha simulada no BigQuery.",
+                resolved_question=(
+                    "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"
+                ),
+            )
+
+    app.dependency_overrides[get_query_graph] = lambda: ToolFailureGraph()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            response = test_client.post(
+                "/query",
+                json={
+                    "question": (
+                        "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"
+                    )
+                },
+                headers={"X-Debug": "true"},
+            )
+    finally:
+        app.dependency_overrides = original_overrides
+
+    body = ErrorResponse.model_validate(response.json())
+
+    assert response.status_code == 500
+    assert body.detail == TEMPORARY_TOOL_FAILURE_MESSAGE
+    assert body.debug is not None
+    assert body.debug.resolved_question == (
+        "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"
+    )
+    assert body.debug.errors[0].source == "tool_executor"
+    assert body.debug.errors[0].error_type == "BigQueryClientError"
+    assert body.debug.errors[0].tool_name == "channel_performance_analyzer"
 
 
 def test_query_rejects_blank_question_with_422(client: TestClient) -> None:

@@ -10,7 +10,11 @@ from pydantic import BaseModel, ValidationError
 
 from app.graph import AnalyticsGraphState, invoke_analytics_graph
 from app.graph.llm import LlmTimeoutError
-from app.graph.workflow import get_persistent_analytics_graph
+from app.graph.workflow import (
+    TEMPORARY_TOOL_FAILURE_MESSAGE,
+    ToolExecutionError,
+    get_persistent_analytics_graph,
+)
 from app.schemas import (
     AgentToolCall,
     DebugError,
@@ -146,6 +150,23 @@ def _build_timeout_debug_info(
     )
 
 
+def _build_tool_execution_debug_info(
+    request: QueryRequest,
+    exc: ToolExecutionError,
+) -> DebugInfo:
+    return DebugInfo(
+        resolved_question=exc.resolved_question or request.question,
+        errors=[
+            DebugError(
+                source="tool_executor",
+                message=exc.debug_message,
+                error_type=exc.error_type or type(exc).__name__,
+                tool_name=exc.tool_name,
+            )
+        ],
+    )
+
+
 def _build_error_response(
     detail: str,
     *,
@@ -170,7 +191,7 @@ def health_check(settings: SettingsDep) -> HealthResponse:
     responses={
         500: {
             "model": ErrorResponse,
-            "description": "Falha temporaria ao consultar ou sintetizar via LLM.",
+            "description": "Falha temporaria ao consultar dados ou sintetizar via LLM.",
         }
     },
 )
@@ -189,6 +210,9 @@ def query_analytics(
     except LlmTimeoutError as exc:
         debug_info = _build_timeout_debug_info(request, exc) if debug else None
         return _build_error_response(LLM_TIMEOUT_ERROR_MESSAGE, debug=debug_info)
+    except ToolExecutionError as exc:
+        debug_info = _build_tool_execution_debug_info(request, exc) if debug else None
+        return _build_error_response(TEMPORARY_TOOL_FAILURE_MESSAGE, debug=debug_info)
 
     messages = state.get("messages", [])
     debug_info = _build_debug_info_from_state(state) if debug else None
