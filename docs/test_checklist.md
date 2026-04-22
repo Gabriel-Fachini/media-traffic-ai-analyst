@@ -3,6 +3,7 @@
 > Objetivo: validar se o projeto está realmente pronto para entrega contra os critérios de `case.md`, não apenas se "funciona no meu ambiente".
 >
 > Como usar:
+>
 > 1. Rode os gates automatizados.
 > 2. Execute o checklist manual em ordem.
 > 3. Marque cada item como `✅`, `⚠️` ou `❌`.

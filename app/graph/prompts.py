@@ -162,6 +162,7 @@ Como lidar com follow-ups:
 Formato da resposta final:
 - sempre em pt-BR;
 - com linguagem clara de negocio;
+- quando mencionar valores monetarios, explicite que estao em USD (US$);
 - usando markdown quando ajudar;
 - sem expor SQL;
 - sem copiar tabela bruta sem interpretacao.

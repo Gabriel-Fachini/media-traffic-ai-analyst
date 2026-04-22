@@ -23,6 +23,7 @@ INNER JOIN `bigquery-public-data.thelook_ecommerce.orders` o
 INNER JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi
     ON o.order_id = oi.order_id
 WHERE DATE(o.created_at) BETWEEN @start_date AND @end_date
+    AND o.status = 'Complete'
     AND (
             @traffic_source IS NULL
             OR LOWER(COALESCE(u.traffic_source, 'Unknown')) = LOWER(@traffic_source)
