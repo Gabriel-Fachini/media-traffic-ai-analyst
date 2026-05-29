@@ -1,0 +1,2111 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Guia de Estudo — Media Traffic AI Analyst</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css">
+<style>
+  :root{
+    --bg:#0a0a0b; --bg-1:#111114; --bg-2:#16161a; --bg-3:#1d1d22;
+    --fg:#e6e6ea; --fg-dim:#a0a0a8; --fg-mute:#6b6b75;
+    --line:#26262d; --line-strong:#36363f;
+    --accent:#5eead4; --accent-2:#34d399; --warn:#fbbf24; --danger:#f87171; --info:#60a5fa; --purple:#a78bfa;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.88em;background:var(--bg-2);padding:1px 5px;border-radius:4px;color:#cce}
+  pre{font-family:var(--mono);background:var(--bg-1);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font-size:13px;line-height:1.5}
+  pre code{background:transparent;padding:0;color:inherit;font-size:inherit}
+  h1,h2,h3,h4{font-weight:600;letter-spacing:-.01em;margin:0}
+  h1{font-size:28px;margin-bottom:6px}
+  h2{font-size:22px;margin:34px 0 12px;padding-top:18px;border-top:1px solid var(--line)}
+  h2:first-of-type{border-top:none;padding-top:0}
+  h3{font-size:17px;color:var(--fg);margin:22px 0 8px}
+  h4{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);margin:18px 0 6px}
+  p{margin:8px 0}
+  ul,ol{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  hr{border:0;border-top:1px solid var(--line);margin:24px 0}
+  details{background:var(--bg-1);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:8px 0}
+  details[open]{background:var(--bg-2)}
+  summary{cursor:pointer;font-weight:500;outline:none;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";color:var(--accent);font-family:var(--mono)}
+  details[open] summary::before{content:"▾ "}
+  /* Layout */
+  .app{display:grid;grid-template-columns:260px minmax(0,1fr) 220px;min-height:100vh}
+  aside.sidebar{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--bg-1);border-right:1px solid var(--line);padding:16px 12px}
+  .brand{font-weight:700;font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);padding:6px 8px 12px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .brand small{display:block;font-size:11px;font-weight:400;color:var(--fg-mute);text-transform:none;letter-spacing:0;margin-top:2px}
+  .search{width:100%;background:var(--bg-2);border:1px solid var(--line);color:var(--fg);padding:7px 10px;border-radius:6px;font-size:13px;margin-bottom:10px;font-family:inherit}
+  .search:focus{outline:none;border-color:var(--accent)}
+  nav a{display:block;padding:6px 10px;color:var(--fg-dim);border-radius:6px;font-size:13.5px;border-left:2px solid transparent;line-height:1.35}
+  nav a:hover{color:var(--fg);background:var(--bg-2);text-decoration:none}
+  nav a.active{color:var(--accent);border-left-color:var(--accent);background:var(--bg-2)}
+  nav .num{display:inline-block;width:22px;color:var(--fg-mute);font-family:var(--mono);font-size:12px}
+  main{padding:32px 44px 80px;max-width:980px;min-width:0}
+  aside.toc{position:sticky;top:0;height:100vh;overflow-y:auto;padding:20px 14px;font-size:12.5px;border-left:1px solid var(--line);background:var(--bg)}
+  aside.toc .toc-label{text-transform:uppercase;color:var(--fg-mute);font-size:11px;letter-spacing:.1em;margin-bottom:8px}
+  aside.toc a{display:block;color:var(--fg-dim);padding:3px 0;line-height:1.4}
+  aside.toc a.active{color:var(--accent)}
+  /* Components */
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:999px;background:var(--bg-3);color:var(--fg-dim);border:1px solid var(--line)}
+  .pill.acc{color:var(--accent);border-color:rgba(94,234,212,.35)}
+  .pill.warn{color:var(--warn);border-color:rgba(251,191,36,.35)}
+  .pill.danger{color:var(--danger);border-color:rgba(248,113,113,.35)}
+  .pill.info{color:var(--info);border-color:rgba(96,165,250,.35)}
+  .pill.purple{color:var(--purple);border-color:rgba(167,139,250,.35)}
+  .card{background:var(--bg-1);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  .card.note{border-left:3px solid var(--accent)}
+  .card.warn{border-left:3px solid var(--warn)}
+  .card.danger{border-left:3px solid var(--danger)}
+  .card h3{margin-top:0}
+  .grid{display:grid;gap:14px}
+  .grid.cols-2{grid-template-columns:1fr 1fr}
+  .grid.cols-3{grid-template-columns:1fr 1fr 1fr}
+  @media (max-width:1100px){.app{grid-template-columns:240px 1fr}aside.toc{display:none}.grid.cols-3{grid-template-columns:1fr 1fr}}
+  @media (max-width:780px){.app{grid-template-columns:1fr}aside.sidebar{position:relative;height:auto;border-right:none;border-bottom:1px solid var(--line)}main{padding:20px}.grid.cols-2,.grid.cols-3{grid-template-columns:1fr}}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--fg-mute);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  .filepath{font-family:var(--mono);font-size:12px;color:var(--fg-mute)}
+  .filepath a{color:var(--info)}
+  .hero{background:linear-gradient(135deg,rgba(94,234,212,.06),rgba(167,139,250,.04));border:1px solid var(--line);border-radius:14px;padding:24px 28px;margin-bottom:24px}
+  .hero h1 span{color:var(--accent)}
+  .hero .tags{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+  .kbd{font-family:var(--mono);font-size:11px;background:var(--bg-3);border:1px solid var(--line-strong);border-bottom-width:2px;padding:1px 6px;border-radius:4px}
+  /* Mermaid */
+  #flow-diagram{background:var(--bg-1);border:1px solid var(--line);border-radius:10px;padding:18px;text-align:center;cursor:default}
+  #flow-diagram .mermaid svg{max-width:100%;height:auto}
+  #flow-diagram .node:hover{cursor:pointer;filter:brightness(1.2)}
+  .diagram-hint{font-size:12px;color:var(--fg-mute);text-align:center;margin-top:10px;font-style:italic}
+  /* Drawer */
+  dialog.drawer{position:fixed;top:0;right:0;height:100vh;width:min(640px,92vw);max-width:none;margin:0;padding:0;background:var(--bg-1);border:none;border-left:1px solid var(--line-strong);color:var(--fg);overflow-y:auto;box-shadow:-10px 0 40px rgba(0,0,0,.45)}
+  dialog.drawer::backdrop{background:rgba(0,0,0,.5)}
+  .drawer-inner{padding:22px 26px 40px}
+  .drawer-close{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;background:var(--bg-1);padding:14px 26px;border-bottom:1px solid var(--line);margin:-22px -26px 16px}
+  .drawer-close button{background:transparent;border:1px solid var(--line);color:var(--fg);padding:5px 12px;border-radius:6px;cursor:pointer;font-family:inherit}
+  .drawer-close button:hover{background:var(--bg-2)}
+  /* Simulador */
+  .sim{background:var(--bg-1);border:1px solid var(--line);border-radius:12px;padding:18px;margin:14px 0}
+  .sim textarea{width:100%;background:var(--bg-2);border:1px solid var(--line);color:var(--fg);padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:13px;min-height:64px;resize:vertical}
+  .sim textarea:focus{outline:none;border-color:var(--accent)}
+  .sim-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .sim-actions button{background:var(--bg-3);border:1px solid var(--line);color:var(--fg);padding:6px 12px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px}
+  .sim-actions button.primary{background:var(--accent);color:#062;border-color:var(--accent);font-weight:600}
+  .sim-actions button.primary:hover{filter:brightness(1.08)}
+  .sim-actions button:hover{background:var(--bg-2)}
+  .sim-examples{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .sim-examples button{font-size:12px;padding:4px 9px;background:transparent;border:1px dashed var(--line-strong);color:var(--fg-dim)}
+  .sim-examples button:hover{border-color:var(--accent);color:var(--accent)}
+  .sim-result{margin-top:14px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px}
+  .sim-row{display:flex;gap:12px;margin:6px 0;font-size:13.5px;align-items:flex-start}
+  .sim-row .lbl{min-width:130px;color:var(--fg-mute);font-family:var(--mono);font-size:12px;padding-top:1px}
+  .sim-trace{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+  .sim-trace ol{margin:4px 0;padding-left:20px;font-size:12.5px;color:var(--fg-dim);font-family:var(--mono)}
+  .sim-trace li{margin:2px 0}
+  /* SQL annotated */
+  .sql-block{position:relative}
+  .sql-block pre{padding-left:40px}
+  .sql-block .ann{position:absolute;left:8px;color:var(--accent);font-family:var(--mono);font-size:11px;background:var(--bg-3);border-radius:50%;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line-strong)}
+  .ann-list{margin-top:10px;font-size:13.5px}
+  .ann-list .anum{display:inline-flex;width:20px;height:20px;background:var(--bg-3);border:1px solid var(--line-strong);border-radius:50%;align-items:center;justify-content:center;color:var(--accent);font-family:var(--mono);font-size:11px;margin-right:8px}
+  /* Q&A */
+  .qa details summary{font-size:14.5px}
+  .qa .tag-sds{color:var(--accent-2)}
+  .qa .tag-eti{color:var(--purple)}
+  .qa .tldr{color:var(--accent);font-weight:500;margin:8px 0}
+  .qa .trap{color:var(--warn);font-size:13px;margin-top:6px;border-left:2px solid var(--warn);padding-left:8px}
+  /* Print */
+  @media print{
+    aside.sidebar,aside.toc,.diagram-hint,.sim-actions,.sim-examples,.drawer-close{display:none}
+    .app{display:block}
+    main{padding:0;max-width:none}
+    pre,.card{break-inside:avoid}
+    a{color:#000;text-decoration:underline}
+    body{background:#fff;color:#000}
+  }
+  .scroll-anchor{display:block;position:relative;top:-10px;visibility:hidden}
+</style>
+</head>
+<body>
+<div class="app">
+
+<aside class="sidebar" aria-label="Navegação principal">
+  <div class="brand">Media Traffic AI<small>Guia de Estudo — Entrevista</small></div>
+  <input type="search" class="search" id="nav-search" placeholder="Filtrar seções..." aria-label="Buscar seções">
+  <nav id="nav">
+    <a href="#visao-geral"><span class="num">01</span>Visão geral</a>
+    <a href="#arquitetura"><span class="num">02</span>Arquitetura interativa</a>
+    <a href="#fluxo-pergunta"><span class="num">03</span>Fluxo de uma pergunta</a>
+    <a href="#langgraph"><span class="num">04</span>LangGraph fundamentals</a>
+    <a href="#tool-calling"><span class="num">05</span>Tool Calling</a>
+    <a href="#router"><span class="num">06</span>Router determinístico</a>
+    <a href="#multi-turn"><span class="num">07</span>Multi-turn &amp; MemorySaver</a>
+    <a href="#sql"><span class="num">08</span>SQL &amp; BigQuery</a>
+    <a href="#backend"><span class="num">09</span>Backend Python</a>
+    <a href="#pydantic"><span class="num">10</span>Pydantic essencial</a>
+    <a href="#produto"><span class="num">11</span>Visão de produto</a>
+    <a href="#simulador"><span class="num">12</span>Simulador router</a>
+    <a href="#decisoes"><span class="num">13</span>Decisões a justificar</a>
+    <a href="#qa"><span class="num">14</span>Q&amp;A simulado</a>
+    <a href="#limitacoes"><span class="num">15</span>Limitações &amp; roadmap</a>
+    <a href="#glossario"><span class="num">16</span>Glossário</a>
+    <a href="#referencias"><span class="num">17</span>Referências</a>
+<a href="#notas-revisao"><span class="num">18</span>Notas de revisão (Q&amp;A)</a>
+  </nav>
+</aside>
+
+<main>
+<header class="hero">
+  <h1>Guia interativo — <span>Media Traffic AI Analyst</span></h1>
+  <p style="color:var(--fg-dim);max-width:720px">Preparação para entrevista Monks (Technology Specialist · AI &amp; Automation). Mapeia <em>todo</em> o repo deste case: arquitetura LangGraph + tool calling, SQL BigQuery, FastAPI/Pydantic, decisões de produto e armadilhas de entrevista. Tudo navegável e auto-contido.</p>
+  <div class="tags">
+    <span class="pill acc">Python 3.10+</span>
+    <span class="pill info">FastAPI</span>
+    <span class="pill purple">LangGraph</span>
+    <span class="pill">BigQuery</span>
+    <span class="pill">Pydantic v2</span>
+    <span class="pill">Tool Calling</span>
+    <span class="pill warn">MVP</span>
+  </div>
+</header>
+
+<!-- 01 -->
+<section id="visao-geral">
+<h2>01 · Visão geral</h2>
+
+<h3>O case em uma frase</h3>
+<p>Construir um <strong>Analista Júnior de Mídia</strong> autônomo que aceita perguntas em pt-BR sobre tráfego/pedidos/receita por canal, consulta o dataset público <code>bigquery-public-data.thelook_ecommerce</code> via <em>tool calling</em> real e responde com leitura de negócio — não despejo de tabela.</p>
+
+<h3>O que está entregue</h3>
+<div class="grid cols-2">
+  <div class="card note">
+    <h3>Funcional</h3>
+    <ul>
+      <li>API FastAPI: <code>GET /health</code>, <code>POST /query</code></li>
+      <li>CLI conversacional <code>analyst-chat</code></li>
+      <li>Multi-turn via <code>thread_id</code> + <code>MemorySaver</code></li>
+      <li>Header <code>X-Debug</code> com router intent + tool calls</li>
+      <li>Volume de usuários, pedidos, receita, ranking</li>
+      <li>Follow-ups estratégicos e diagnósticos</li>
+    </ul>
+  </div>
+  <div class="card warn">
+    <h3>Limitações intencionais</h3>
+    <ul>
+      <li>Sem persistência durável entre restarts</li>
+      <li>Sem ROAS, CAC, CTR, CPC, CPM (fora do schema)</li>
+      <li>Dataset = <code>users</code>, <code>orders</code>, <code>order_items</code></li>
+      <li>Filtro por 1 canal por tool call</li>
+      <li>Sem UI web</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Stack obrigatória (do case)</h3>
+<table>
+<tr><th>Requisito</th><th>Implementação</th></tr>
+<tr><td>Python 3.10+</td><td><code>pyproject.toml</code> · <code>requires-python = ">=3.10,&lt;4.0"</code></td></tr>
+<tr><td>Framework Web</td><td>FastAPI</td></tr>
+<tr><td>Orquestrador IA</td><td>LangGraph</td></tr>
+<tr><td>Tool Calling real</td><td><code>StructuredTool.from_function</code> + <code>tool_choice="auto"</code></td></tr>
+<tr><td>BigQuery cliente oficial</td><td><code>google-cloud-bigquery</code></td></tr>
+<tr><td>SQL parametrizada</td><td><code>bigquery.ScalarQueryParameter</code></td></tr>
+</table>
+
+<h3>O que o entrevistador realmente avalia</h3>
+<p>Os 4 critérios do case têm pesos diferentes — saiba onde o foco está:</p>
+<table>
+<tr><th>Critério</th><th>Peso</th><th>Onde mostrar</th></tr>
+<tr><td>Arquitetura do Agente</td><td><span class="pill acc">Alto</span></td><td>Separação prompt × execução; ciclo tool calling; short-circuits</td></tr>
+<tr><td>Qualidade do Backend</td><td><span class="pill acc">Alto</span></td><td>Pydantic, type hints, pyright, camadas de erro</td></tr>
+<tr><td>Engenharia de Dados (SQL)</td><td><span class="pill warn">Médio</span></td><td>JOINs corretos, COUNT(DISTINCT), NUMERIC, parametrização</td></tr>
+<tr><td>Visão de Produto</td><td><span class="pill acc">Alto</span></td><td>Resposta útil &gt; resposta crua; recusa fora de escopo; clarificações</td></tr>
+</table>
+
+<h3>Personas dos entrevistadores</h3>
+<div class="grid cols-2">
+  <div class="card">
+    <h3><span class="tag-sds" style="color:var(--accent-2)">[Sr Data Scientist]</span></h3>
+    <p>Vai pressionar SQL, viés de dataset, soundness analítica, escolha de métricas. Pergunta favorita: <em>"Como você sabe que essa receita está correta?"</em> Resposta-chave: <code>COUNT(DISTINCT order_id)</code> + <code>status='Complete'</code> + <code>CAST AS NUMERIC</code> + INNER JOIN coerente.</p>
+  </div>
+  <div class="card">
+    <h3><span class="tag-eti" style="color:var(--purple)">[Especialista TI]</span></h3>
+    <p>Foca em arquitetura, segurança, observability, custo, deploy. Pergunta favorita: <em>"Como você escalaria isso pra produção?"</em> Resposta-chave: durable checkpointer (Redis/Postgres), Cloud Run, BQ slot reservation, cache, rate limit, Langfuse/OTel.</p>
+  </div>
+</div>
+</section>
+
+<!-- 02 -->
+<section id="arquitetura">
+<h2>02 · Arquitetura interativa</h2>
+<p>O grafo abaixo é o <code>StateGraph</code> compilado em <code>build_analytics_graph</code> (<span class="filepath">app/graph/workflow.py:836</span>). <strong>Clique em qualquer node</strong> para abrir o painel com snippet real, responsabilidade e racional.</p>
+
+<div id="flow-diagram">
+<pre class="mermaid">
+flowchart LR
+    START([START]):::startNode --> P[preprocess]:::nodeBox
+    P -- "short-circuit (refusal/clarification)" --> E1([END]):::endNode
+    P -- "intent válida" --> A[agent]:::nodeBox
+    A -- "tool_call" --> T[tool_executor]:::nodeBox
+    T -- "ToolMessage" --> A
+    T -. "BigQuery" .-> BQ[("thelook_ecommerce")]:::extNode
+    A -- "final_answer (sem tool_call)" --> E2([END]):::endNode
+    click P call onMermaidNode("preprocess")
+    click A call onMermaidNode("agent")
+    click T call onMermaidNode("tool_executor")
+    classDef nodeBox fill:#16161a,stroke:#5eead4,stroke-width:2px,color:#e6e6ea;
+    classDef startNode fill:#1d1d22,stroke:#34d399,color:#34d399;
+    classDef endNode fill:#1d1d22,stroke:#fbbf24,color:#fbbf24;
+    classDef extNode fill:#16161a,stroke:#60a5fa,color:#60a5fa,stroke-dasharray:4 2;
+</pre>
+<div class="diagram-hint">▸ clique nos nodes <code>preprocess</code>, <code>agent</code> e <code>tool_executor</code> para detalhes</div>
+</div>
+
+<h3>Mapa de responsabilidades</h3>
+<table>
+<tr><th>Arquivo</th><th>Responsabilidade</th></tr>
+<tr><td class="filepath">app/main.py</td><td>Superfície HTTP, contratos, <code>X-Debug</code>, tratamento <code>LlmTimeoutError</code></td></tr>
+<tr><td class="filepath">app/graph/workflow.py</td><td>Grafo, loop <code>preprocess → agent ⇄ tool_executor</code>, guard 3 iter</td></tr>
+<tr><td class="filepath">app/graph/router.py</td><td>Intent, datas, traffic_source, clarificações, recusas</td></tr>
+<tr><td class="filepath">app/graph/prompts.py</td><td>Política conversacional, prompts follow-up</td></tr>
+<tr><td class="filepath">app/graph/llm.py</td><td>Provider, fallback, <code>bind_tools</code>, timeout</td></tr>
+<tr><td class="filepath">app/graph/tools.py</td><td>Registro <code>StructuredTool</code> exposto ao LLM</td></tr>
+<tr><td class="filepath">app/tools/*.py</td><td>Queries SQL reais + mapeamento tipado</td></tr>
+<tr><td class="filepath">app/clients/bigquery_client.py</td><td>Cliente BQ + erros de infra</td></tr>
+<tr><td class="filepath">app/schemas/*.py</td><td>Contratos Pydantic da API, router e tools</td></tr>
+</table>
+</section>
+
+<!-- 03 -->
+<section id="fluxo-pergunta">
+<h2>03 · Fluxo de uma pergunta</h2>
+<p>Trace passo-a-passo de <code>POST /query {"question":"Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"}</code>:</p>
+
+<ol>
+<li><strong>HTTP recebe</strong> em <code>query_analytics</code> (<span class="filepath">app/main.py:198</span>). Valida via <code>QueryRequest</code> (Pydantic). Se faltar <code>thread_id</code>, gera UUID.</li>
+<li><strong>Invoca grafo</strong> persistente via <code>invoke_analytics_graph</code> com <code>thread_id</code> → carrega histórico do <code>MemorySaver</code>.</li>
+<li><strong>preprocess_node</strong> chama <code>build_router_decision(question)</code>. Detecta:
+  <ul>
+    <li>intent = <code>channel_performance</code> (tokens <code>receita</code>)</li>
+    <li>traffic_source = <code>Search</code> (alias)</li>
+    <li>start_date / end_date parseadas via <code>YYYY-MM-DD</code></li>
+    <li>nenhuma clarificação necessária → não short-circuita</li>
+  </ul>
+  Injeta <code>HumanMessage</code> no estado e roteia para <code>agent</code>.</li>
+<li><strong>agent_node</strong> monta input: system prompt (<code>build_conversation_system_prompt</code>) + router guidance + histórico do turn. Chama LLM com tools bound (<code>tool_choice="auto"</code>).</li>
+<li>LLM retorna <code>AIMessage</code> com <code>tool_calls=[{name: "channel_performance_analyzer", args: {traffic_source: "Search", start_date: "2024-01-01", end_date: "2024-01-31"}}]</code>.</li>
+<li><strong>tool_executor_node</strong> resolve a tool em <code>tools_by_name</code>, valida args via <code>ChannelPerformanceInput</code> (Pydantic), executa <code>channel_performance_analyzer</code> que dispara a SQL parametrizada no BigQuery.</li>
+<li>BQ retorna rows → empacota em <code>ToolMessage</code> com <code>content</code> JSON + <code>artifact</code> tipado.</li>
+<li><strong>agent_node novamente</strong> recebe o <code>ToolMessage</code>, sintetiza resposta final em pt-BR com leitura de negócio, sem tool_calls desta vez → <code>final_answer</code>.</li>
+<li><strong>HTTP responde</strong> com <code>QueryResponse</code>: answer, tools_used, metadata (thread_id, debug se ativo).</li>
+</ol>
+
+<div class="card note">
+  <h3>Detalhe não óbvio: o guard de iteração</h3>
+  <p>O <code>agent_node</code> conta quantas <code>AIMessage</code> com <code>tool_calls</code> existem no turn atual. Se ≥ <code>_MAX_AGENT_ITERATIONS</code> (3), corta com mensagem temporária e termina. Sem isso, um LLM defeituoso poderia loopar <code>agent → tool_executor → agent → tool_executor</code> infinitamente, queimando tokens e dinheiro.</p>
+</div>
+</section>
+
+<!-- 04 -->
+<section id="langgraph">
+<h2>04 · LangGraph fundamentals</h2>
+
+<h3>Conceito em 1 parágrafo</h3>
+<p>LangGraph é um framework de orquestração de agentes baseado em <strong>grafo de estado explícito</strong>. Diferente do <code>AgentExecutor</code> da LangChain (que esconde o loop ReAct dentro de uma classe), o LangGraph te força a declarar nodes, edges e reducers. Vantagem: você controla short-circuits, debugging, guards de iteração, persistência e ramificação condicional. Custo: mais boilerplate inicial.</p>
+
+<h3>Componentes essenciais</h3>
+<table>
+<tr><th>Componente</th><th>Papel</th></tr>
+<tr><td><code>StateGraph(StateType)</code></td><td>Container do grafo, parametrizado pelo TypedDict do estado</td></tr>
+<tr><td>Node</td><td>Função pura <code>(state) → Command | dict</code> que muta o estado</td></tr>
+<tr><td>Edge</td><td>Transição entre nodes; pode ser estática (<code>add_edge</code>) ou retornada via <code>Command(goto=...)</code></td></tr>
+<tr><td><code>Annotated[list, add_messages]</code></td><td>Reducer — diz ao LangGraph que o campo <code>messages</code> deve ser <strong>concatenado</strong> em vez de sobrescrito</td></tr>
+<tr><td><code>Command(update=..., goto=...)</code></td><td>Retorno de node combinando atualização de estado + decisão de roteamento</td></tr>
+<tr><td><code>checkpointer</code></td><td>Persiste estado por <code>thread_id</code>; aqui usa <code>MemorySaver</code> in-memory</td></tr>
+</table>
+
+<h3>State deste projeto</h3>
+<pre><code class="language-python">class AnalyticsGraphState(TypedDict, total=False):
+    question: str
+    messages: Annotated[list[AnyMessage], add_messages]  # reducer concatena
+    router_decision: dict[str, Any]
+    resolved_question: str
+    turn_start_index: int
+    final_answer: str          # overwrite por turn
+    tools_used: list[str]      # overwrite por turn
+    debug_errors: list[dict[str, Any]]</code></pre>
+<p class="filepath">app/graph/workflow.py:76</p>
+
+<h3>Montagem do grafo</h3>
+<pre><code class="language-python">graph = StateGraph(AnalyticsGraphState)
+graph.add_node("preprocess", preprocess_node)
+graph.add_node("agent", agent_node)
+graph.add_node("tool_executor", tool_executor_node)
+graph.add_edge(START, "preprocess")
+graph.add_edge("tool_executor", "agent")  # loop ReAct
+return graph.compile(checkpointer=checkpointer)</code></pre>
+<p class="filepath">app/graph/workflow.py:1046</p>
+<p>Note que <strong>preprocess</strong> e <strong>agent</strong> usam <code>Command(goto=...)</code> para decidir o próximo node dinamicamente, então não precisam de <code>add_edge</code> estático. Já <code>tool_executor → agent</code> é estático porque sempre volta.</p>
+
+<div class="card note">
+  <h3>Por que não existe <code>add_edge(..., END)</code> explícito?</h3>
+  <p>O destino "fim do grafo" é decidido em runtime pelo próprio node, via <code>Command(goto="__end__")</code>. A string <code>"__end__"</code> é o sentinel equivalente à constante <code>END</code> de <code>langgraph.graph</code>. Quando node retorna <code>Command</code> com <code>goto</code>, o edge estático fica redundante — funciona como <code>if/else</code> em código normal: ambos os caminhos existem no grafo compilado, só um executa por invocação. Para o Studio desenhar a aresta tracejada, declare o retorno como <code>Command[Literal["agent", "__end__"]]</code> ou use <code>add_conditional_edges</code>.</p>
+</div>
+
+<h3>Pegadinha de entrevista</h3>
+<div class="card warn">
+  <p><strong>Por que LangGraph em vez de <code>create_react_agent</code> ou <code>AgentExecutor</code>?</strong> Resposta: controle explícito do loop, possibilidade de injetar um <code>preprocess</code> determinístico antes do LLM (economizando tokens em short-circuits), guard de iteração, observabilidade dos nodes individualmente, e mensagens de sistema condicionais por intent (follow-up estratégico vs diagnóstico).</p>
+</div>
+
+<div class="card note">
+  <h3>O que é ReAct e onde aparece</h3>
+  <p><strong>ReAct = Reasoning + Acting.</strong> LLM alterna <em>Thought</em> (raciocínio) → <em>Action</em> (chama tool com args) → <em>Observation</em> (lê resultado) → repete até resposta final. Hoje "ReAct agent" virou sinônimo do loop <code>LLM → tool → LLM → tool → ... → final</code>, com tool calls em JSON estruturado em vez de texto Thought/Action.</p>
+  <p><strong>Onde aparece em produção:</strong> Claude Code, Cursor, Codex/Copilot Workspace, Aider, Cline, ChatGPT (Code Interpreter/Browse), Claude com tools/MCP, Devin, OpenHands — todos rodam ReAct no núcleo. Diferenças entre produtos não estão no padrão, mas em <em>tool set</em>, gestão de contexto, planning opcional antes do loop e orquestração multi-agente. Variantes acadêmicas (Reflexion, Tree of Thoughts, LATS) existem mas produção comercial usa ReAct puro ~95% das vezes — simples ganha.</p>
+  <p><strong>Senioridade na escolha:</strong> não é "fiz short-circuit funcionar", é <em>trade-off consciente</em>. Júnior pega <code>create_react_agent</code> porque é o que o tutorial mostra; sênior abre mão da conveniência por controle e justifica.</p>
+</div>
+</section>
+
+<!-- 05 -->
+<section id="tool-calling">
+<h2>05 · Tool Calling</h2>
+
+<h3>Conceito em 1 parágrafo</h3>
+<p>Tool calling (function calling) é o protocolo onde o LLM <strong>não executa código</strong>; em vez disso, ele retorna um JSON estruturado descrevendo qual função chamar e com quais argumentos. Você executa, retorna o resultado, e o LLM sintetiza. Isso troca alucinação por auditoria: SQL é fixa, validada, parametrizada — o LLM só escolhe parâmetros dentro de um schema declarado.</p>
+
+<h3>Ciclo neste projeto</h3>
+<ol>
+  <li>App registra tools com <code>StructuredTool.from_function</code> e schema Pydantic.</li>
+  <li>App chama <code>model.bind_tools(tools, tool_choice="auto")</code> → LangChain converte o schema Pydantic em JSON schema OpenAI/Anthropic.</li>
+  <li>LLM recebe a pergunta + descrições das tools, devolve <code>AIMessage.tool_calls</code>.</li>
+  <li><code>tool_executor_node</code> resolve por <code>name</code>, valida args com Pydantic, executa, devolve <code>ToolMessage</code>.</li>
+  <li>LLM agora vê o resultado e produz <code>AIMessage</code> sem tool_calls = resposta final.</li>
+</ol>
+
+<h3>Registro das tools</h3>
+<pre><code class="language-python">TRAFFIC_VOLUME_ANALYZER_TOOL = StructuredTool.from_function(
+    func=_run_traffic_volume_analyzer,
+    name="traffic_volume_analyzer",
+    description=(
+        "Use somente para perguntas sobre volume de usuarios por canal "
+        "no periodo informado. Retorna user_count agregado por traffic_source. "
+        "Nao use para receita, pedidos, ticket medio ou desempenho financeiro. "
+        "Se a pergunta nao trouxer start_date e end_date, peca clarificacao "
+        "antes de chamar a tool. traffic_source e opcional e aceita somente "
+        "um canal por vez."
+    ),
+    args_schema=TrafficVolumeInput,
+)</code></pre>
+<p class="filepath">app/graph/tools.py:42</p>
+
+<div class="card note">
+  <p><strong>Por que duas tools em vez de uma "mega-tool"?</strong> Descrições mais precisas levam o LLM a escolhas melhores. Uma tool única com flag <code>metric="volume" | "revenue"</code> faria o LLM acertar menos. Tools focadas funcionam como <em>"single responsibility principle"</em> para LLMs.</p>
+</div>
+
+<h3>tool_choice="auto" vs "required" vs "none"</h3>
+<table>
+<tr><th>Valor</th><th>Comportamento</th><th>Quando usar</th></tr>
+<tr><td><code>"auto"</code></td><td>LLM decide se chama tool ou responde direto</td><td>Padrão deste projeto — permite follow-up estratégico sem nova query</td></tr>
+<tr><td><code>"required"</code></td><td>Força tool call</td><td>Workflow onde toda resposta exige dado fresco</td></tr>
+<tr><td><code>"none"</code></td><td>Nunca chama tool</td><td>Modo summarização puro</td></tr>
+</table>
+
+<h3>Binding com fallback</h3>
+<pre><code class="language-python">def _bind_analytics_tools(model: BaseChatModel) -> Any:
+    return model.bind_tools(get_analytics_tools(), tool_choice="auto")
+
+# Resiliência: provider primário com fallback opcional
+primary_model = prepare_model(settings.llm_provider, settings.llm_model)
+if settings.llm_fallback_provider:
+    fallback_model = prepare_model(settings.llm_fallback_provider, fallback_model_name)
+    return primary_model.with_fallbacks([fallback_model])
+return primary_model</code></pre>
+<p class="filepath">app/graph/llm.py:91</p>
+
+<h3>Pegadinha de entrevista</h3>
+<div class="card warn">
+  <p><strong>"Por que não deixou o LLM gerar SQL direto?"</strong> 4 motivos: (1) <em>segurança</em> — eliminar superfície de SQL injection; (2) <em>custo previsível</em> — queries auditáveis, não <code>SELECT *</code> caótico; (3) <em>determinismo</em> — testes unitários cobrem a SQL, não o LLM; (4) <em>billing BQ</em> — bytes escaneados controlados.</p>
+</div>
+</section>
+
+<!-- 06 -->
+<section id="router"><h2>06 · Router determinístico</h2>
+
+<div class="card note">
+  <h3>Esclarecimento: o router não é um node do grafo</h3>
+  <p>Router é uma <strong>função pura</strong> <code>build_router_decision(question: str) → RouterDecision</code> chamada <em>dentro</em> do <code>preprocess_node</code>. Não existe um node "router" no <code>StateGraph</code>. O <code>preprocess_node</code> apenas: (1) pega a pergunta do state, (2) chama <code>build_router_decision</code>, (3) decide <code>Command(goto=...)</code> conforme o resultado. Determinístico de ponta a ponta — sem LLM dentro.</p>
+</div>
+
+<h3>Por que existir fora do LLM</h3>
+<p>O router é um classificador <strong>regex/token-set</strong> em Python puro que roda <strong>antes</strong> do LLM. Custo: zero tokens. Latência: microssegundos. Cobre:</p>
+<ul>
+  <li>Classificação de <strong>intent</strong></li>
+  <li>Normalização de <strong>datas</strong> (5 formatos)</li>
+  <li>Detecção de <strong>traffic_source</strong> com aliases</li>
+  <li>Guardrails de schema (recusa CAC/ROAS, recusa "por campanha")</li>
+  <li>Decisão de <strong>short-circuit</strong> (clarificação ou recusa) sem nunca acordar o LLM</li>
+</ul>
+
+<h3>Intents possíveis</h3>
+<table>
+<tr><th>Intent</th><th>Trigger</th><th>Próximo passo</th></tr>
+<tr><td><code>traffic_volume</code></td><td>tokens de <em>volume/usuários</em>, sem performance</td><td>agent → tool <code>traffic_volume_analyzer</code></td></tr>
+<tr><td><code>channel_performance</code></td><td>tokens <em>receita/pedidos/ranking</em> ou comparação</td><td>agent → tool <code>channel_performance_analyzer</code></td></tr>
+<tr><td><code>ambiguous_analytics</code></td><td>contexto válido mas métrica ambígua (ex: "como performou")</td><td>agent pede clarificação curta</td></tr>
+<tr><td><code>strategy_follow_up</code></td><td>tokens <em>ações, plano, priorizar</em> + contexto prévio</td><td>agent responde direto usando contexto do thread</td></tr>
+<tr><td><code>diagnostic_follow_up</code></td><td>tokens <em>por que, explica, hipótese</em> + contexto prévio</td><td>agent responde com leitura diagnóstica</td></tr>
+<tr><td><code>out_of_scope</code></td><td>métrica/dimensão fora do schema</td><td>short-circuit com <code>OUT_OF_SCOPE_MESSAGE</code></td></tr>
+</table>
+
+<h3>Formatos temporais suportados</h3>
+<pre><code class="language-python">EXPLICIT_DATE_TOKEN_PATTERN = re.compile(
+    r"\b(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{2}(?:\d{2})?)\b"
+)
+YESTERDAY_PATTERN = re.compile(r"\bontem\b")
+THIS_MONTH_PATTERN = re.compile(r"\beste\s+mes\b")
+LAST_MONTH_PATTERN = re.compile(r"\bultimo\s+mes\b")
+LAST_N_DAYS_PATTERN = re.compile(r"\bultimos?\s+(\d+)\s+dias?\b")</code></pre>
+<p class="filepath">app/graph/router.py:10</p>
+
+<h3>Métricas e dimensões recusadas</h3>
+<pre><code class="language-python">UNSUPPORTED_METRIC_TOKENS = frozenset({
+    "cac","roas","roi","ltv","ctr","cpc","cpm",
+    "impressao","impressoes","impression","impressions",
+    "clique","cliques","click","clicks",
+    "empresa","empresas","company","companies",
+})
+UNSUPPORTED_DIMENSION_TOKENS = frozenset({
+    "campanha","campanhas","campaign","campaigns",
+    "anuncio","anuncios","ad","ads",
+    "criativo","criativos","creative","creatives",
+})</code></pre>
+<p class="filepath">app/graph/router.py:331</p>
+
+<h3>Short-circuit no preprocess</h3>
+<pre><code class="language-python">if _router_decision_short_circuits(router_decision):
+    state_update["final_answer"] = (
+        router_decision.response_message or EMPTY_QUESTION_MESSAGE
+    )
+    state_update["tools_used"] = []
+    return Command(update=state_update, goto="__end__")
+return Command(update=state_update, goto="agent")</code></pre>
+<p class="filepath">app/graph/workflow.py:870</p>
+
+<div class="card note">
+  <p><strong>Trade-off declarado:</strong> regex é frágil para PT livre — variações como <em>"qual o trafego dos canais"</em> sem acento podem escapar tokens. A normalização Unicode (NFKD + strip de combining chars) cobre acentos, mas não cobre erros de digitação ou sinônimos não previstos. Custo de adicionar LLM-based router: tokens em <strong>toda</strong> requisição válida. Decisão: aceitar fragilidade controlada por testes (<code>tests/unit/test_router.py</code>).</p>
+</div>
+
+<h3>Pseudocódigo do classificador</h3>
+<pre><code class="language-python">def build_router_decision(question: str) -> RouterDecision:
+    norm = _normalize(question)              # NFKD + lower + strip acentos
+    tokens = set(norm.split())
+
+    if not norm:
+        return RouterDecision(intent="empty", short_circuit=True, ...)
+
+    if tokens & UNSUPPORTED_METRIC_TOKENS:    # CAC, ROAS, CTR, ...
+        return RouterDecision(intent="out_of_scope", short_circuit=True, ...)
+
+    start, end = _parse_dates(norm)           # regex (5 formatos)
+    source = _detect_traffic_source(norm)     # dict de aliases
+
+    if tokens & REVENUE_TOKENS:
+        intent = "channel_performance"
+    elif tokens & VOLUME_TOKENS:
+        intent = "traffic_volume"
+    elif tokens & STRATEGY_TOKENS and has_prev_context:
+        intent = "strategy_follow_up"
+    else:
+        intent = "ambiguous_analytics"
+
+    if intent in ("traffic_volume","channel_performance") and not (start and end):
+        return RouterDecision(intent=intent, short_circuit=True,
+                              response_message=CLARIFY_DATES_MESSAGE)
+
+    return RouterDecision(intent=intent, traffic_source=source,
+                          start_date=start, end_date=end, short_circuit=False)</code></pre>
+<p>Pipeline = if/else + regex + lookups em <code>frozenset</code>. Determinístico, O(n) no tamanho da pergunta, microssegundos.</p>
+
+<h3>Datas relativas — também if/regex</h3>
+<pre><code class="language-python">if YESTERDAY_PATTERN.search(norm):
+    end = today() - timedelta(days=1); start = end
+elif m := LAST_N_DAYS_PATTERN.search(norm):
+    n = int(m.group(1))
+    end = today(); start = end - timedelta(days=n)
+elif THIS_MONTH_PATTERN.search(norm):
+    start = today().replace(day=1); end = today()
+elif LAST_MONTH_PATTERN.search(norm):
+    first_this = today().replace(day=1)
+    end = first_this - timedelta(days=1); start = end.replace(day=1)
+elif m := EXPLICIT_DATE_TOKEN_PATTERN.findall(norm):
+    start, end = _parse_explicit(m)</code></pre>
+
+<h3>Trade-off determinístico vs ML/LLM-based</h3>
+<table>
+<tr><th>Dimensão</th><th>Determinístico</th><th>ML/LLM-based</th></tr>
+<tr><td>Custo por request</td><td>Zero</td><td>Tokens em <strong>toda</strong> request</td></tr>
+<tr><td>Latência</td><td>μs</td><td>Centenas de ms a segundos</td></tr>
+<tr><td>Reprodutibilidade</td><td>100%</td><td>Não-determinístico</td></tr>
+<tr><td>Testabilidade</td><td><code>pytest</code> cobre</td><td>Exige eval suite + dataset</td></tr>
+<tr><td>Typo/sinônimo</td><td>Frágil</td><td>Generaliza</td></tr>
+<tr><td>Recusa "fora de escopo"</td><td>100% reliable</td><td>~95% (5% inventa)</td></tr>
+<tr><td>Debugging</td><td>Leia o regex</td><td>Caixa preta</td></tr>
+</table>
+
+<div class="card warn">
+  <h3>Resposta-modelo para "por que não usou LLM router?"</h3>
+  <ol>
+    <li><strong>Escopo fechado</strong> — case define 3 tabelas e 2 perguntas-tipo. Espaço de intents cabe em regex.</li>
+    <li><strong>Critério "fora de escopo"</strong> — case avalia recusa explícita. Regex recusa CAC/ROAS com 100% reliability.</li>
+    <li><strong>Custo previsível</strong> — agent já paga LLM. Router LLM dobra custo sem ganho aqui.</li>
+    <li><strong>Testabilidade</strong> — <code>pytest</code> cobre router. LLM router exigiria eval suite, fora do MVP.</li>
+  </ol>
+  <p>Em domínio aberto, inverteria. Híbrido = próximo passo: regex pega óbvios, LLM resolve ambíguos.</p>
+</div>
+</section>
+
+<!-- 07 -->
+<section id="multi-turn"><h2>07 · Multi-turn &amp; MemorySaver</h2>
+
+<h3>Como a continuidade funciona</h3>
+<p>O cliente passa um <code>thread_id</code> em cada request. O grafo é compilado com um <code>checkpointer</code> (<code>MemorySaver</code>) que, no fim de cada invocação, salva o estado completo (incluindo <code>messages</code> agregadas pelo reducer <code>add_messages</code>) na chave do thread. Na próxima invocação com o mesmo thread, o LangGraph carrega o histórico e merges com o novo input.</p>
+
+<pre><code class="language-python">@lru_cache
+def get_persistent_analytics_graph() -> Any:
+    return build_analytics_graph(get_settings(), checkpointer=MemorySaver())
+
+# Invocação com thread:
+config = {"configurable": {"thread_id": thread_id}}
+return resolved_graph.invoke(input_state, config=config)</code></pre>
+<p class="filepath">app/graph/workflow.py:1058</p>
+
+<h3>3 tipos de follow-up suportados</h3>
+<ol>
+  <li><strong>Temporal</strong> — "Entre 2024-01-01 e 2024-01-31." após router pedir <code>missing_dates</code>. Workflow mergeia com a pergunta anterior.</li>
+  <li><strong>Métrica</strong> — "Volume de usuários." após router pedir <code>ambiguous_metric</code>.</li>
+  <li><strong>Estratégico/Diagnóstico</strong> — "Quais ações priorizar?" ou "Por que essa concentração?" após análise válida no mesmo thread.</li>
+</ol>
+
+<h3>Decisão de intent de follow-up</h3>
+<pre><code class="language-python">def _resolve_follow_up_intent(question, *, has_prior_context, ...):
+    if not has_prior_context:
+        return None
+    if question_is_strategy_follow_up(question):
+        return "strategy_follow_up"
+    if question_is_diagnostic_follow_up(question):
+        return "diagnostic_follow_up"
+    if question_is_contextual_diagnostic_follow_up(question):
+        return "diagnostic_follow_up"
+    # ... heurísticas adicionais para perguntas curtas
+    return None</code></pre>
+<p class="filepath">app/graph/workflow.py:523</p>
+
+<h3>Prompts especializados por follow-up</h3>
+<p>Quando o intent é <code>strategy_follow_up</code> ou <code>diagnostic_follow_up</code>, o <code>agent_node</code> injeta um <code>SystemMessage</code> extra (<code>STRATEGY_FOLLOW_UP_SYSTEM_PROMPT</code> ou <code>DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT</code>) + um bloco com "contexto analítico anterior" (pergunta + resposta + tool results). Isso permite responder <em>sem nova tool call</em> quando o dado já existe no thread.</p>
+
+<div class="card warn">
+  <h3>Limitação para discutir na entrevista</h3>
+  <p><code>MemorySaver</code> guarda em RAM do processo Python. Restart = thread perdido. Para produção: <code>RedisSaver</code> ou <code>PostgresSaver</code>. Trade-off: latência por turn aumenta (rede), mas threads sobrevivem deploys. Bonus: <code>checkpointer</code> também permite <em>time travel</em> — rebobinar para um estado anterior e reexplorar.</p>
+</div>
+</section>
+
+<!-- 08 -->
+<section id="sql"><h2>08 · SQL &amp; BigQuery deep-dive</h2>
+
+<h3>Query principal — channel_performance</h3>
+<div class="sql-block">
+<pre><code class="language-sql">SELECT
+    COALESCE(u.traffic_source, 'Unknown') AS traffic_source,    -- (1)(2)
+    COUNT(DISTINCT o.order_id) AS total_orders,                  -- (3)
+    COALESCE(ROUND(SUM(CAST(oi.sale_price AS NUMERIC)), 2), 0)   -- (4)(5)
+        AS total_revenue
+FROM `bigquery-public-data.thelook_ecommerce.users` u
+INNER JOIN `bigquery-public-data.thelook_ecommerce.orders` o    -- (6)
+    ON u.id = o.user_id
+INNER JOIN `bigquery-public-data.thelook_ecommerce.order_items` oi
+    ON o.order_id = oi.order_id
+WHERE DATE(o.created_at) BETWEEN @start_date AND @end_date       -- (7)
+    AND o.status = 'Complete'                                    -- (8)
+    AND (
+            @traffic_source IS NULL                              -- (9)
+            OR LOWER(COALESCE(u.traffic_source, 'Unknown'))
+               = LOWER(@traffic_source)
+    )
+GROUP BY COALESCE(u.traffic_source, 'Unknown')
+ORDER BY total_revenue DESC, total_orders DESC                   -- (10)
+</code></pre>
+</div>
+<p class="filepath">app/tools/channel_performance_analyzer.py:14</p>
+
+<div class="ann-list">
+<p><span class="anum">1</span><strong>COALESCE traffic_source</strong> — NULL vira <code>'Unknown'</code> para evitar perda silenciosa de linhas no <code>GROUP BY</code>. Sem isso, NULLs viram um bucket implícito difícil de auditar.</p>
+<p><span class="anum">2</span><strong>Alias <code>u.</code>, <code>o.</code>, <code>oi.</code></strong> — disambiguação obrigatória após JOINs com colunas homônimas.</p>
+<p><span class="anum">3</span><strong>COUNT(DISTINCT order_id)</strong> — crítico. <code>order_items</code> tem N linhas por pedido (1 por item). Sem DISTINCT, um pedido com 3 itens conta como 3 pedidos. Esta linha é o que separa um engenheiro de dados sênior de um júnior na entrevista.</p>
+<p><span class="anum">4</span><strong>CAST AS NUMERIC</strong> — <code>sale_price</code> está em <code>FLOAT64</code>. Somar floats acumula erro binário (<code>0.1 + 0.2 ≠ 0.3</code>). Em receita, isso é inaceitável. <code>NUMERIC</code> é decimal com precisão fixa.</p>
+<p><span class="anum">5</span><strong>ROUND(..., 2)</strong> — apresentação em centavos, mas <em>depois</em> do SUM, não antes (round em cada linha enviesa o total).</p>
+<p><span class="anum">6</span><strong>INNER JOIN</strong> — descarta usuários sem pedido e pedidos sem itens. Correto para "receita por canal": só usuários que compraram contam. Para <em>conversion rate</em> seria <code>LEFT JOIN</code> (precisa do denominador completo).</p>
+<p><span class="anum">7</span><strong>BETWEEN inclusivo</strong> — datas usam fronteira de dia. Filtra por <code>created_at</code> do pedido, não do usuário (receita realizada no período, não cohort).</p>
+<p><span class="anum">8</span><strong>status='Complete'</strong> — exclui Cancelled/Returned/Processing. Sem isso, "receita" infla com pedidos que nunca viraram dinheiro real.</p>
+<p><span class="anum">9</span><strong>Filtro condicional</strong> — quando o usuário não especifica canal, <code>@traffic_source IS NULL</code> deixa todos passarem. <code>LOWER(...)</code> dos dois lados garante case-insensitive.</p>
+<p><span class="anum">10</span><strong>ORDER BY tiebreaker</strong> — receita decrescente, com fallback em pedidos. Determinístico mesmo com empate de receita.</p>
+</div>
+
+<h3>Query de volume — traffic_volume</h3>
+<pre><code class="language-sql">SELECT
+    COALESCE(traffic_source, 'Unknown') AS traffic_source,
+    COUNT(DISTINCT id) AS user_count
+FROM `bigquery-public-data.thelook_ecommerce.users`
+WHERE DATE(created_at) BETWEEN @start_date AND @end_date
+    AND (
+            @traffic_source IS NULL
+            OR LOWER(COALESCE(traffic_source, 'Unknown')) = LOWER(@traffic_source)
+    )
+GROUP BY COALESCE(traffic_source, 'Unknown')
+ORDER BY user_count DESC</code></pre>
+<p class="filepath">app/tools/traffic_volume_analyzer.py:8</p>
+<p>Note: <code>COUNT(DISTINCT id)</code> é defensivo aqui também (<code>users.id</code> é PK, mas o hábito é correto e estende para casos onde joins sejam adicionados).</p>
+
+<h3>Parametrização anti-injection</h3>
+<pre><code class="language-python">parameters = [
+    bigquery.ScalarQueryParameter("start_date", "DATE", tool_input.start_date),
+    bigquery.ScalarQueryParameter("end_date",   "DATE", tool_input.end_date),
+    bigquery.ScalarQueryParameter("traffic_source", "STRING", tool_input.traffic_source),
+]
+query_rows = client.run_query(sql=CHANNEL_PERFORMANCE_SQL, parameters=parameters)</code></pre>
+<p class="filepath">app/tools/channel_performance_analyzer.py:42</p>
+<p>Nenhuma string do usuário é concatenada na SQL. <code>@param</code> placeholders são resolvidos no servidor BQ, não em Python.</p>
+
+<h3>BigQuery: o que cobrar custa</h3>
+<table>
+<tr><th>Conceito</th><th>Implicação</th></tr>
+<tr><td>Billing por bytes escaneados</td><td><code>SELECT *</code> é proibido; sempre projete só o que precisa</td></tr>
+<tr><td>Partitioning</td><td>Tabelas particionadas por data escaneiam só partições filtradas. Dataset público não permite controle, mas saber existe importa.</td></tr>
+<tr><td>Clustering</td><td>Ordena fisicamente por colunas frequentes em filtros — reduz bytes lidos</td></tr>
+<tr><td>Dry run</td><td><code>--dry_run</code> ou <code>bigquery.QueryJobConfig(dry_run=True)</code> estima custo antes de executar</td></tr>
+<tr><td>Slot reservation</td><td>Para workloads previsíveis, fixa custo mensal em vez de pay-per-byte</td></tr>
+</table>
+
+<h3>Variações mentais para entrevista</h3>
+<details><summary>Ticket médio por canal</summary>
+<pre><code class="language-sql">SUM(CAST(oi.sale_price AS NUMERIC)) / NULLIF(COUNT(DISTINCT o.order_id), 0) AS avg_order_value</code></pre>
+<p><code>NULLIF</code> evita divisão por zero.</p>
+</details>
+<details><summary>Conversion rate por canal</summary>
+<pre><code class="language-sql">SELECT
+  u.traffic_source,
+  COUNT(DISTINCT u.id) AS users,
+  COUNT(DISTINCT o.user_id) AS buyers,
+  SAFE_DIVIDE(COUNT(DISTINCT o.user_id), COUNT(DISTINCT u.id)) AS conv_rate
+FROM `bigquery-public-data.thelook_ecommerce.users` u
+LEFT JOIN `bigquery-public-data.thelook_ecommerce.orders` o
+  ON u.id = o.user_id AND o.status = 'Complete'
+WHERE DATE(u.created_at) BETWEEN @s AND @e
+GROUP BY u.traffic_source</code></pre>
+<p>LEFT JOIN essencial: precisamos do denominador completo de usuários, mesmo os que nunca compraram. Trocar INNER → LEFT quando a métrica muda é sinal de senioridade — mostra que você entende <em>semântica</em> do JOIN, não copiou padrão.</p>
+</details>
+
+<div class="card warn">
+  <h3>INNER vs LEFT — quando cada um</h3>
+  <table>
+    <tr><th>Métrica</th><th>JOIN correto</th><th>Por quê</th></tr>
+    <tr><td>Receita por canal</td><td><code>users INNER JOIN orders</code></td><td>Só quem comprou interessa. Usuários sem pedido não somam receita.</td></tr>
+    <tr><td>Conversion rate</td><td><code>users LEFT JOIN orders</code></td><td>Denominador inclui quem <strong>não</strong> comprou. INNER inflaria a taxa para ~100%.</td></tr>
+    <tr><td>Ticket médio</td><td><code>orders INNER JOIN order_items</code></td><td>Só pedidos com itens entram. Sem itens, não há valor.</td></tr>
+  </table>
+  <p>Regra: se o denominador da métrica inclui "todos", LEFT. Se inclui só "quem fez X", INNER.</p>
+</div>
+</section>
+
+<!-- 09 -->
+<section id="backend"><h2>09 · Backend Python</h2>
+
+<h3>Estrutura de pastas</h3>
+<pre><code>app/
+  clients/      # infra (BigQuery client + erros)
+  graph/        # orquestração LangGraph
+    workflow.py # nodes + montagem
+    router.py   # classificação determinística
+    llm.py      # provider + fallback + tool binding
+    tools.py    # registro StructuredTool
+    prompts.py  # política conversacional
+  tools/        # SQL + analyzers (lógica de negócio)
+  schemas/      # contratos Pydantic
+  utils/        # config validada
+  cli.py        # CLI conversacional
+  main.py       # API FastAPI
+  verify.py     # gate local (ruff + compile + pyright)</code></pre>
+
+<h3>Endpoint principal</h3>
+<pre><code class="language-python">@app.post("/query", response_model=QueryResponse, tags=["query"])
+def query_analytics(
+    request: QueryRequestBody,
+    graph: AnalyticsGraphDep,
+    debug: DebugHeader = False,
+) -> QueryResponse | JSONResponse:
+    thread_id = request.thread_id or str(uuid4())
+    try:
+        state = invoke_analytics_graph(request.question, thread_id=thread_id, graph=graph)
+    except LlmTimeoutError as exc:
+        debug_info = _build_timeout_debug_info(request, exc) if debug else None
+        return _build_error_response(LLM_TIMEOUT_ERROR_MESSAGE, debug=debug_info)
+    except ToolExecutionError as exc:
+        debug_info = _build_tool_execution_debug_info(request, exc) if debug else None
+        return _build_error_response(TEMPORARY_TOOL_FAILURE_MESSAGE, debug=debug_info)
+
+    return QueryResponse(
+        answer=state.get("final_answer", ""),
+        tools_used=state.get("tools_used", []),
+        metadata=QueryMetadata(
+            thread_id=thread_id,
+            thread_id_source="provided" if request.thread_id else "generated",
+            context_message_count=len(state.get("messages", [])),
+            debug=_build_debug_info_from_state(state) if debug else None,
+        ),
+    )</code></pre>
+<p class="filepath">app/main.py:186</p>
+
+<h3>Camadas de erro</h3>
+<table>
+<tr><th>Camada</th><th>Exceção</th><th>Vira</th></tr>
+<tr><td>BigQuery (infra)</td><td><code>GoogleAPIError</code> / <code>DefaultCredentialsError</code></td><td><code>BigQueryClientError</code></td></tr>
+<tr><td>Tool execution</td><td>qualquer exc da tool</td><td><code>ToolExecutionError</code> → HTTP 500 estruturado</td></tr>
+<tr><td>LLM provider</td><td><code>TimeoutError</code>, <code>httpx.TimeoutException</code>, etc</td><td><code>LlmTimeoutError</code> → HTTP 500 estruturado</td></tr>
+<tr><td>Settings/env</td><td><code>SettingsError</code></td><td>boot-time fail-fast</td></tr>
+</table>
+
+<h3>Gate local: <code>poetry run verify</code></h3>
+<ol>
+  <li><code>poetry run ruff check app scripts tests</code></li>
+  <li><code>python3 -m compileall app scripts tests</code></li>
+  <li><code>poetry run pyright</code></li>
+</ol>
+<p>Pyright (não mypy) porque é mais rápido e tem inferência melhor para tipos de retorno encadeados (útil com decorators do LangChain). Compile é cinto-e-suspensórios contra SyntaxError em arquivos não importados pelos testes.</p>
+
+<h3>FastAPI vs Flask — por que FastAPI</h3>
+<ul>
+  <li>Validação de body/query via Pydantic <em>nativa</em>; sem decorators extras.</li>
+  <li><code>response_model</code> + OpenAPI auto-gerado em <code>/docs</code>.</li>
+  <li>Type hints viram parte do contrato, não decoração.</li>
+  <li>Dependency injection real via <code>Depends</code> — testável.</li>
+  <li>Async support sem hacks (mesmo que este projeto seja sync por escolha).</li>
+</ul>
+</section>
+
+<!-- 10 -->
+<section id="pydantic"><h2>10 · Pydantic essencial</h2>
+
+<h3>Por que Pydantic em vez de dataclass</h3>
+<ul>
+  <li><strong>Validação em runtime</strong> — <code>dataclass</code> não verifica tipos, só armazena.</li>
+  <li><strong>JSON Schema gratuito</strong> — <code>model.model_json_schema()</code>. É <em>exatamente</em> isso que o LangChain envia para o LLM no binding de tools.</li>
+  <li><strong>Coerção controlada</strong> — string ISO vira <code>date</code> automaticamente via <code>field_validator</code>.</li>
+  <li><strong>Serialização</strong> — <code>model_dump(mode="json")</code> resolve <code>Decimal</code>, <code>date</code>, <code>UUID</code>.</li>
+  <li><strong>extra="forbid"</strong> — falha em campo extra no input, útil em contrato HTTP.</li>
+</ul>
+
+<h3>Exemplo: schema de input de tool</h3>
+<pre><code class="language-python">class DateRangeInput(BaseModel):
+    start_date: date = Field(description="Data inicial obrigatoria no formato YYYY-MM-DD")
+    end_date:   date = Field(description="Data final obrigatoria no formato YYYY-MM-DD")
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("start_date", "end_date", mode="before")
+    @classmethod
+    def parse_iso_date(cls, value: Any) -> date:
+        if isinstance(value, datetime):
+            raise ValueError("Use somente data no formato YYYY-MM-DD, sem horario.")
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+        raise ValueError("Data invalida. Use o formato YYYY-MM-DD.")
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> DateRangeInput:
+        if self.start_date > self.end_date:
+            raise ValueError("start_date deve ser menor ou igual a end_date.")
+        return self</code></pre>
+<p class="filepath">app/schemas/tools.py:16</p>
+
+<h3>v1 → v2 — mudanças que entrevistador testa</h3>
+<div class="card note">
+  <p><strong>Contexto:</strong> Pydantic v2 é um <em>rewrite</em> de 2023. Core foi reescrito em Rust (<code>pydantic-core</code>), ficando 10–50× mais rápido. Não tem relação com LangGraph nem com nenhum framework — é só o ORM/validador. Entrevistador testa porque muito código legado ainda está em v1 e a migração é dolorida (API quebrou).</p>
+</div>
+<table>
+<tr><th>v1</th><th>v2</th></tr>
+<tr><td><code>.dict()</code></td><td><code>.model_dump()</code></td></tr>
+<tr><td><code>.parse_obj()</code></td><td><code>.model_validate()</code></td></tr>
+<tr><td><code>@validator</code></td><td><code>@field_validator</code></td></tr>
+<tr><td><code>@root_validator</code></td><td><code>@model_validator</code></td></tr>
+<tr><td><code>class Config:</code></td><td><code>model_config = ConfigDict(...)</code></td></tr>
+<tr><td>Performance Python pura</td><td>Core em Rust (10-50× mais rápido)</td></tr>
+</table>
+</section>
+
+<!-- 11 -->
+<section id="produto"><h2>11 · Visão de produto</h2>
+<p>Produto = "Analista Júnior de Mídia", não <em>query runner</em>. Tudo aqui é decisão de produto, não acidente.</p>
+
+<h3>Princípios codificados nos prompts</h3>
+<div class="card note">
+<ul>
+  <li><strong>pt-BR</strong> sempre — público é mídia/growth no Brasil.</li>
+  <li><strong>Leitura de negócio</strong>, não despejo de tabela — "Search liderou em volume, indicando..." em vez de "user_count: 12345".</li>
+  <li><strong>Recusa curta e educada</strong> em fora-de-escopo, não erro 500.</li>
+  <li><strong>Clarificação curta</strong> quando ambíguo, não suposição silenciosa.</li>
+  <li><strong>Diferenciar observação de hipótese</strong> em diagnostic follow-ups.</li>
+  <li><strong>USD explícito</strong> em valores monetários (dataset é em dólar).</li>
+  <li><strong>Sem expor SQL</strong> na resposta final.</li>
+</ul>
+</div>
+
+<h3>Trecho da política conversacional</h3>
+<pre><code class="language-text">Politica de decisao:
+1. Se a pergunta depender de dados ainda nao consultados neste turno, faca tool_call.
+2. Se a pergunta for um follow-up estrategico ou diagnostico e o contexto
+   anterior do thread ja for suficiente, responda diretamente sem tool_call.
+3. Se a pergunta estiver dentro do escopo, nao recuse por variacao de linguagem.
+4. Se a pergunta estiver no dominio mas a metrica ainda estiver ambigua entre
+   volume de usuarios e performance financeira, peca uma clarificacao curta.
+5. Se faltar informacao essencial, peca clarificacao em vez de recusar.
+6. So recuse quando a pergunta realmente sair do schema.
+7. Nunca invente metricas, colunas, joins, filtros, canais canonicos ou datas.</code></pre>
+<p class="filepath">app/graph/prompts.py:127</p>
+
+<h3>X-Debug — superfície de inspeção</h3>
+<p>Header opcional. Quando ativo, a resposta inclui <code>metadata.debug</code> com:</p>
+<ul>
+  <li><code>resolved_question</code> — pergunta após merge de follow-up</li>
+  <li><code>router_intent</code> — classificação do router</li>
+  <li><code>router_short_circuit</code> — quando aplicável</li>
+  <li><code>agent_tool_calls</code> — args reais que o LLM passou</li>
+  <li><code>errors</code> — capturados estruturadamente</li>
+</ul>
+<p>Existe para o avaliador conseguir <em>provar</em> que tool calling aconteceu, sem precisar ler logs.</p>
+</section>
+
+<!-- 12 -->
+<section id="simulador"><h2>12 · Simulador router</h2>
+<div class="card warn">
+<p>⚠ Esta é uma <strong>reimplementação JS simplificada</strong> da lógica de <code>app/graph/router.py</code> para demonstração educacional. O comportamento autoritativo está em Python. Detalhes de follow-up multi-turn e merges de clarificação não estão aqui — esses dependem do estado do thread, que esta UI não simula.</p>
+</div>
+
+<div class="sim">
+  <label for="sim-input" style="font-size:13px;color:var(--fg-dim);display:block;margin-bottom:6px">Pergunta:</label>
+  <textarea id="sim-input" placeholder="Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"></textarea>
+  <div class="sim-actions">
+    <button class="primary" id="sim-run">Classificar</button>
+    <button id="sim-clear">Limpar</button>
+  </div>
+  <div style="margin-top:10px;font-size:12px;color:var(--fg-mute)">Exemplos rápidos:</div>
+  <div class="sim-examples" id="sim-examples"></div>
+  <div class="sim-result" id="sim-result" hidden></div>
+</div>
+</section>
+
+<!-- 13 -->
+<section id="decisoes"><h2>13 · Decisões a justificar</h2>
+<p>15 trade-offs que o entrevistador <em>vai</em> sondar. Cada um com TL;DR.</p>
+
+<ol>
+<li><strong>LangGraph em vez de <code>AgentExecutor</code>:</strong> controle explícito do loop + guard de 3 iterações + short-circuit no preprocess + nodes inspecionáveis para debug.</li>
+<li><strong>Router determinístico antes do LLM:</strong> custo (regex grátis), latência (μs), determinismo, guardrails consistentes mesmo se o LLM tiver fallback.</li>
+<li><strong>Tools fixas em vez de LLM-gera-SQL:</strong> anti-injection, custo BQ previsível, auditoria de query, testes determinísticos.</li>
+<li><strong>Duas tools separadas (volume vs performance):</strong> descrições mais precisas levam o LLM a escolhas melhores; menos prompt engineering ad-hoc.</li>
+<li><strong><code>tool_choice="auto"</code>:</strong> permite o LLM responder follow-up estratégico/diagnóstico sem nova query quando contexto já basta.</li>
+<li><strong><code>MemorySaver</code> in-memory:</strong> escopo MVP; documentado como limitação; troca direta por <code>RedisSaver</code> em produção.</li>
+<li><strong>FastAPI:</strong> tipagem nativa + Pydantic + OpenAPI auto. Flask precisaria de Marshmallow/apispec.</li>
+<li><strong>temperature=0:</strong> respostas analíticas determinísticas; anti-alucinação em síntese de números.</li>
+<li><strong>pt-BR + leitura de negócio:</strong> público real é mídia BR, não desenvolvedor. Produto não é query runner.</li>
+<li><strong>CLI consome a própria API:</strong> mesmo contrato de cliente real; descobriria bug de serialização antes do front existir.</li>
+<li><strong>Fallback OpenAI ↔ Anthropic:</strong> resiliência a outage de provider; configurável via env, não hardcoded.</li>
+<li><strong><code>status='Complete'</code>:</strong> receita realizada, exclui Cancelled/Returned. Métrica de negócio, não bruta.</li>
+<li><strong><code>COUNT(DISTINCT order_id)</code>:</strong> evita inflação por <code>order_items</code> ter N linhas por pedido. Item técnico que separa SQL júnior de sênior.</li>
+<li><strong><code>CAST AS NUMERIC</code>:</strong> precisão decimal em receita; float acumula erro binário.</li>
+<li><strong>Limitações explícitas no README:</strong> sem ROAS, sem UI, sem persistência durável — sinal de maturidade de escopo, não de incapacidade.</li>
+</ol>
+
+<div class="card note">
+  <h3>Como justificar qualquer escolha — framework</h3>
+  <p>Padrão de resposta: <code>[escolha] porque [requisito do case] exige [propriedade]. Alternativa [X] foi descartada porque [custo concreto]. Em [contexto Y], inverteria.</code></p>
+  <p>Mostre que <em>conhece a alternativa</em>, <em>descartou conscientemente</em> e sabe <em>quando inverteria</em>. Júnior responde "porque é bom"; sênior responde com trade-off.</p>
+</div>
+</section>
+
+<!-- 14 -->
+<section id="qa" class="qa"><h2>14 · Q&amp;A simulado</h2>
+<p>Tags: <span class="tag-sds" style="color:var(--accent-2)">[Sr DS]</span> Sr Data Scientist · <span class="tag-eti" style="color:var(--purple)">[ETI]</span> Especialista TI · <span style="color:var(--accent)">[Geral]</span> ambos.</p>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Explique a arquitetura em 2 minutos.</summary>
+<p class="tldr">TL;DR: FastAPI → router determinístico → agent LLM com tools → tool_executor → BigQuery → síntese pt-BR. Multi-turn via thread_id + MemorySaver.</p>
+<ul>
+<li>FastAPI recebe <code>POST /query</code> com pergunta + thread_id opcional.</li>
+<li><code>preprocess</code> roda router em Python puro: classifica intent, parseia datas, detecta canal, decide short-circuit. Custa zero token.</li>
+<li>Se short-circuit (recusa ou clarificação), responde direto sem LLM.</li>
+<li>Senão, <code>agent_node</code> chama LLM com tools bound via <code>tool_choice="auto"</code>.</li>
+<li>LLM retorna <code>AIMessage.tool_calls</code> → <code>tool_executor</code> resolve por nome, valida args (Pydantic), executa SQL parametrizada no BQ.</li>
+<li><code>ToolMessage</code> volta para o agent que sintetiza resposta final em pt-BR.</li>
+<li>Loop guard de 3 iterações previne runaway.</li>
+<li>Multi-turn: <code>MemorySaver</code> indexa por <code>thread_id</code>.</li>
+</ul>
+<p class="trap">Armadilha: não soletre "ReAct" sem necessidade. Foco na separação prompt × execução, é o que o critério "arquitetura" pondera alto.</p>
+</details>
+
+<details><summary><span class="tag-sds">[Sr DS]</span> Como você sabe que a receita está correta?</summary>
+<p class="tldr">TL;DR: 4 garantias compostas — <code>COUNT(DISTINCT order_id)</code>, <code>status='Complete'</code>, <code>CAST AS NUMERIC</code>, INNER JOIN coerente com a pergunta.</p>
+<ul>
+<li><code>order_items</code> tem N linhas por pedido. Sem <code>DISTINCT</code>, um pedido com 3 itens conta 3 vezes em <code>total_orders</code>.</li>
+<li><code>SUM(sale_price)</code> com <code>FLOAT64</code> acumula erro binário. <code>CAST AS NUMERIC</code> garante precisão decimal.</li>
+<li>Receita "realizada" exclui Cancelled/Returned via <code>status='Complete'</code>.</li>
+<li>INNER JOIN porque só usuários que compraram contam para receita. LEFT JOIN distorceria com NULLs.</li>
+<li>Validável: <code>poetry run pytest -m live</code> roda contra o BQ real.</li>
+</ul>
+<p class="trap">Armadilha: se ele pedir conversion rate, mude para LEFT JOIN. É o sinal de que você entende o porquê do INNER, não copia padrão.</p>
+</details>
+
+<details><summary><span class="tag-sds">[Sr DS]</span> Por que <code>NUMERIC</code> em vez de <code>FLOAT64</code>?</summary>
+<p class="tldr">TL;DR: NUMERIC é decimal de precisão fixa (38 dígitos, 9 decimais). FLOAT64 é IEEE 754 binário — acumula erro em somas.</p>
+<ul>
+<li><code>0.1 + 0.2</code> em float = <code>0.30000000000000004</code>.</li>
+<li>Em 100k pedidos somados, erro vira centavos errados visíveis.</li>
+<li>NUMERIC tem custo de storage maior, mas para colunas de dinheiro o trade-off é óbvio.</li>
+<li>BigQuery também oferece <code>BIGNUMERIC</code> para 76 dígitos — overkill aqui.</li>
+</ul>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Tool calling vs LLM gerando SQL — por que tool calling?</summary>
+<p class="tldr">TL;DR: segurança, custo, auditoria, testabilidade.</p>
+<ul>
+<li><strong>Segurança</strong>: queries fixas eliminam injection. SQL gerada por LLM precisaria sanitizar e validar AST.</li>
+<li><strong>Custo BQ</strong>: queries auditadas escaneiam só o necessário. LLM tende a <code>SELECT *</code>.</li>
+<li><strong>Custo LLM</strong>: tokens para "explique a query" são caros e redundantes.</li>
+<li><strong>Determinismo</strong>: testes cobrem SQL, não o output do LLM.</li>
+<li><strong>Schema garantido</strong>: args validados via Pydantic antes da execução.</li>
+</ul>
+<p class="trap">Armadilha: não venda como "evita alucinação 100%" — o LLM ainda pode chamar tool errada. Venda como redução de superfície de risco.</p>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Como escalaria isso para produção?</summary>
+<p class="tldr">TL;DR: durable checkpointer + cache + slot reservation + observability + deploy gerenciado.</p>
+<ul>
+<li><strong>Checkpointer</strong>: trocar <code>MemorySaver</code> por <code>PostgresSaver</code> ou <code>RedisSaver</code>. Threads sobrevivem deploy.</li>
+<li><strong>Cache</strong>: queries idênticas (mesma <code>start_date/end_date/traffic_source</code>) podem cachear no Redis com TTL.</li>
+<li><strong>BQ</strong>: slot reservation para custo fixo previsível; ou continuar pay-per-byte com budget alerts.</li>
+<li><strong>Deploy</strong>: Cloud Run (stateless) + Cloud SQL/Memorystore para o checkpointer. Cloud Functions se for low-traffic.</li>
+<li><strong>Observability</strong>: Langfuse para traces de LLM, OpenTelemetry para o resto, BQ jobs com labels.</li>
+<li><strong>Async/fila</strong>: queries longas viram task assíncrona; cliente consulta status. Evita timeout HTTP.</li>
+<li><strong>Rate limit</strong>: por <code>thread_id</code> ou IP para conter abuso de tokens.</li>
+<li><strong>Secrets</strong>: Secret Manager em vez de <code>.env</code>; rotação automática.</li>
+</ul>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Como você protege contra SQL injection?</summary>
+<p class="tldr">TL;DR: nenhuma string de usuário entra na SQL — só via <code>bigquery.ScalarQueryParameter</code>.</p>
+<ul>
+<li>Parâmetros <code>@start_date</code>, <code>@end_date</code>, <code>@traffic_source</code> são resolvidos pelo servidor BQ.</li>
+<li>Pydantic valida tipos antes (<code>date</code>, <code>str</code>).</li>
+<li>Router normaliza <code>traffic_source</code> para enum de aliases (<code>Search</code>, <code>Organic</code>, ...).</li>
+<li>Mesmo se o LLM passasse SQL como traffic_source, BQ trataria como literal string, não SQL.</li>
+</ul>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Como adicionar uma nova métrica como ROAS?</summary>
+<p class="tldr">TL;DR: ROAS exige tabela de custos de mídia, que não existe em <code>thelook_ecommerce</code>. Para adicionar mecanicamente seria: nova intent + nova tool + novo schema + ajuste de prompt.</p>
+<ol>
+<li>Remover <code>roas</code> de <code>UNSUPPORTED_METRIC_TOKENS</code> em <code>router.py</code>.</li>
+<li>Criar intent <code>media_efficiency</code>.</li>
+<li>Criar tool <code>roas_analyzer</code> com schema Pydantic + SQL que JOIN com tabela de custos (fonte externa: Meta Ads API, Google Ads API).</li>
+<li>Registrar em <code>get_analytics_tools()</code>.</li>
+<li>Atualizar prompt de política para descrever o escopo expandido.</li>
+<li>Testes unitários e integration cobrindo a nova intent.</li>
+</ol>
+<p class="trap">Armadilha: não prometa entregar isso em produção sem mencionar custo de manutenção da integração com APIs de mídia externas (auth, rate limit, schema drift).</p>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> O que o guard de 3 iterações protege?</summary>
+<p class="tldr">TL;DR: loop infinito <code>agent → tool_executor → agent → tool_executor → ...</code> queimando tokens.</p>
+<ul>
+<li>Causa típica: LLM rejeita o ToolMessage e chama outra tool indefinidamente.</li>
+<li>Sem guard: minutos de loop = dólares perdidos + timeout HTTP.</li>
+<li>Implementação: <code>_count_agent_iterations_in_turn</code> conta <code>AIMessage</code> com <code>tool_calls</code> no turn atual.</li>
+<li>Atingiu 3 → retorna <code>TEMPORARY_LLM_FAILURE_MESSAGE</code> + flag em <code>debug_errors</code>.</li>
+</ul>
+</details>
+
+<details><summary><span class="tag-sds">[Sr DS]</span> O <code>traffic_source</code> em <code>users</code> reflete origem real? Que viés tem?</summary>
+<p class="tldr">TL;DR: é proxy do canal de aquisição do usuário, não do canal da compra. Viés: atribuição do <em>último clique no signup</em>, não da venda.</p>
+<ul>
+<li>thelook é dataset sintético; <code>traffic_source</code> não tem definição rica.</li>
+<li>Em produção real, atribuição multi-touch precisaria de tabela de sessões.</li>
+<li>"Search liderou em receita" significa "usuários cujo signup veio de Search compraram mais", não "Search converteu nessa compra".</li>
+<li>Para mídia paga, isso pode subestimar canais de remarketing.</li>
+</ul>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Onde IA ajudou no desenvolvimento e onde você redirigiu?</summary>
+<p class="tldr">TL;DR: scaffold inicial e regex auxiliados; arquitetura, fronteira de tools, SQL e prompts dirigidos por você.</p>
+<ul>
+<li>IA acelerou: boilerplate FastAPI, base de regex de datas, descrições iniciais de tools.</li>
+<li>Você dirigiu: decisão LangGraph vs AgentExecutor, separação preprocess/agent, escolha de duas tools, SQL com DISTINCT + NUMERIC + status=Complete, política conversacional.</li>
+<li>Refez quando: IA sugeriu <code>SELECT *</code> em prototipagem; trocou por colunas explícitas. IA propôs tool única com flag; separou em duas.</li>
+</ul>
+<p class="trap">Armadilha: seja honesto. Eles veem o git history se quiserem. Vender "fiz tudo do zero sem IA" em 2026 é red flag de bullshit.</p>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Qual sua maior fraqueza neste MVP?</summary>
+<p class="tldr">TL;DR: persistência in-memory, router regex frágil para PT livre, sem cache, sem rate limit.</p>
+<ul>
+<li>MemorySaver perde thread em restart — documentado, trocável.</li>
+<li>Router cobre forms canônicos; perguntas com sinônimos não previstos podem virar <code>out_of_scope</code> indevidamente.</li>
+<li>Sem cache de queries — perguntas repetidas re-escaneiam BQ.</li>
+<li>Sem rate limit — abuse vector de tokens.</li>
+<li>Dataset 3 tabelas — não dá pra responder coisas legítimas como funil ou retention.</li>
+</ul>
+<p class="trap">Armadilha: não improvise fraquezas inventadas. Liste as reais e mostre que pensou na mitigação.</p>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Por que <code>temperature=0</code>?</summary>
+<p class="tldr">TL;DR: determinismo em síntese analítica + redução de alucinação em números.</p>
+<ul>
+<li>Análise quantitativa não deve variar entre runs com mesmo input.</li>
+<li>Reduz risco de o LLM inventar números próximos aos reais.</li>
+<li>Custo: respostas podem ficar repetitivas em formato; mitigado pelo prompt pedir variação.</li>
+</ul>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Como você testa esse sistema?</summary>
+<p class="tldr">TL;DR: 4 camadas — unit (router/contracts), integration (workflow/API), live (BQ real), readiness (cenários de produto).</p>
+<ul>
+<li><code>tests/unit/test_router.py</code> — cada intent + cada short-circuit.</li>
+<li><code>tests/integration/test_workflow.py</code> — ciclo agent ↔ tool_executor com LLM e BQ fakeados.</li>
+<li><code>tests/integration/test_api.py</code> — HTTP + thread_id + debug.</li>
+<li><code>tests/live/test_live_validation.py</code> — opt-in (<code>pytest -m live</code>), bate em BQ + LLM reais.</li>
+<li><code>tests/readiness/test_readiness_suite.py</code> — cenários da seção 5 do README.</li>
+<li><code>poetry run verify</code> — ruff + compile + pyright.</li>
+</ul>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Custo por request — como você estimaria?</summary>
+<p class="tldr">TL;DR: soma tokens LLM + bytes BQ + tempo Cloud Run.</p>
+<ul>
+<li><strong>LLM</strong>: ~2k tokens input (prompt + tools schema + history) × ~500 tokens output. Em GPT-4o = ~$0.01-0.02 por turn.</li>
+<li><strong>BQ</strong>: query escaneia ~MBs (com filtro de data) → fração de centavo. ~$5/TB.</li>
+<li><strong>Compute</strong>: Cloud Run = ~ms-segundos por request, desprezível em low traffic.</li>
+<li>Maior alavanca: cache de queries idênticas + redução de prompt boilerplate.</li>
+</ul>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Conhece RAG? Por que não usou aqui?</summary>
+<p class="tldr">TL;DR: RAG = Retrieval Augmented Generation. Aqui o "retrieval" é SQL estruturada via tool calling, não busca vetorial. Não precisa.</p>
+<ul>
+<li>RAG cabe quando o conhecimento está em texto não estruturado (docs, tickets, transcrições).</li>
+<li>Aqui o conhecimento é dado tabular tipado em BQ — SQL parametrizada é o retrieval correto.</li>
+<li>Se entrasse documentação de produto/processo, faria sentido adicionar RAG paralelo: vector DB (Pinecone/Weaviate) + tool <code>doc_retriever</code>.</li>
+</ul>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Como deployaria isso no GCP?</summary>
+<p class="tldr">TL;DR: Cloud Run para a API, Cloud SQL/Memorystore para checkpointer, Secret Manager para credenciais, BQ já é managed.</p>
+<ul>
+<li><code>fastapi dev</code> vira <code>uvicorn</code> em container Docker.</li>
+<li>Cloud Run autoscale 0→N, billing por request.</li>
+<li>Workload Identity Federation para acesso BQ (sem service account key).</li>
+<li>Cloud Build CI: ruff + pytest antes do push.</li>
+<li>Cloud Logging captura stdout estruturado.</li>
+</ul>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> O que separa esta solução de "prompt gigante mandando tudo pra LLM"?</summary>
+<p class="tldr">TL;DR: ciclo agent ↔ tool_executor real + router determinístico + SQL parametrizada + camadas de erro estruturadas.</p>
+<ul>
+<li>Prompt monolítico mandaria as 3 tabelas inteiras para o LLM e pediria "calcule a receita" — caro, lento, errado, inseguro.</li>
+<li>Aqui: LLM decide qual tool, com quais args. SQL roda em BQ. LLM só sintetiza o resumo agregado.</li>
+<li>Auditável via <code>X-Debug</code>: cada tool call aparece.</li>
+<li>Testável: SQL e router têm testes; LLM tem só o contrato (input → tool_call esperado).</li>
+</ul>
+</details>
+
+<details><summary><span class="tag-sds">[Sr DS]</span> O ranking inclui pedidos cancelados?</summary>
+<p class="tldr">TL;DR: não. <code>WHERE o.status = 'Complete'</code> filtra explicitamente.</p>
+<p>Para incluir todos os status, removeria a cláusula. Para discriminar, adicionaria <code>GROUP BY ..., o.status</code> e quebraria por status.</p>
+</details>
+
+<details><summary><span class="tag-eti">[ETI]</span> Observabilidade — o que você instrumentaria primeiro?</summary>
+<p class="tldr">TL;DR: tempo por node + tool latency + token usage + taxa de short-circuit.</p>
+<ul>
+<li>Tempo por node revela gargalo (LLM vs BQ).</li>
+<li>Tool latency p50/p99 detecta degradação BQ.</li>
+<li>Token usage por intent ajuda a otimizar prompt.</li>
+<li>% short-circuit é proxy de qualidade do router — alto = bom; muito baixo pode indicar router fraco e LLM compensando.</li>
+<li>Erro rate por <code>source</code> (router, agent, tool_executor) — já estruturado em <code>debug_errors</code>.</li>
+</ul>
+</details>
+
+<details><summary><span style="color:var(--accent)">[Geral]</span> Se sua entrevista for amanhã, qual sua revisão mínima?</summary>
+<ol>
+<li>Releitura sem IA de <code>workflow.py</code>, <code>router.py</code>, <code>channel_performance_analyzer.py</code>.</li>
+<li>Rodar <code>./scripts/run_local_chat.sh</code> com os 4 cenários do README seção 5.</li>
+<li>Revisar diagrama mermaid e narrar fluxo em voz alta em 90 segundos.</li>
+<li>Decorar as 15 decisões da seção 13 deste guia.</li>
+<li>Glossário desta página (seção 16).</li>
+</ol>
+</details>
+</section>
+
+<!-- 15 -->
+<section id="limitacoes"><h2>15 · Limitações &amp; roadmap</h2>
+<div class="grid cols-2">
+<div class="card warn">
+<h3>O MVP não faz</h3>
+<ul>
+<li>Persistir threads entre restarts</li>
+<li>Calcular ROAS, CAC, CTR, CPC, CPM, LTV</li>
+<li>Quebrar por campanha, anúncio ou criativo</li>
+<li>Multi-canal por query (filtro 1 canal por vez)</li>
+<li>UI web — só API + CLI</li>
+<li>Cache de queries</li>
+<li>Rate limiting</li>
+<li>Observability além de <code>X-Debug</code></li>
+</ul>
+</div>
+<div class="card note">
+<h3>Próximos passos lógicos</h3>
+<ol>
+<li>Durable checkpointer (Postgres/Redis) — sobrevive a restart, escala horizontal</li>
+<li><strong>Eval suite</strong> (Langsmith/Langfuse) — dataset de <code>(input, expected)</code>, evaluators assertivos (intent/tool/args) + LLM-as-judge (qualidade da resposta), CI bloqueia merge se accuracy cai. Sem isso, trocar modelo é roleta-russa.</li>
+<li><strong>Cache LRU</strong> em queries idênticas (key = <code>tool_name + traffic_source + start_date + end_date</code>) — <em>Least Recently Used</em>, tamanho fixo, O(1) get/put, descarta o mais antigo. Hit economiza scan BQ. Precisa TTL para "hoje" (stale data).</li>
+<li>Integração com Meta/Google Ads APIs para ROAS real</li>
+<li>Streamlit UI consumindo a API</li>
+<li>Deploy em Cloud Run + Cloud Build CI</li>
+<li>Rate limit por thread_id</li>
+<li>Pgvector para RAG de documentação de produto</li>
+</ol>
+</div>
+</div>
+
+<div class="card note">
+  <h3>Langsmith — utilidade direta neste projeto</h3>
+  <p>Plataforma de eval + observability (LangChain Inc, integração nativa com LangGraph). Alternativas: Langfuse (OSS), Braintrust, Helicone.</p>
+  <ul>
+    <li><strong>Tracing:</strong> cada <code>graph.invoke</code> vira trace hierárquico (preprocess → agent → tool_executor → agent). Inputs/outputs, tokens, latência e custo USD por node. Substitui o <code>X-Debug</code> com algo muito mais rico.</li>
+    <li><strong>Datasets + eval:</strong> coleta perguntas reais como dataset. Evaluators assertivos (intent/tool/args) + LLM-as-judge. CI roda em cada PR.</li>
+    <li><strong>Regression catch:</strong> trocar <code>gpt-4o-mini → claude-haiku</code> com 200 casos de teste vs roleta-russa.</li>
+    <li><strong>Prompt iteration:</strong> playground edita prompt, roda contra dataset, vê diff antes de mergear.</li>
+  </ul>
+  <p><strong>Frase para entrevista:</strong> "Langsmith resolveria dois gaps atuais — observability granular por node em produção e eval suite com regression gate em CI. Sem isso, qualquer troca de modelo ou tweak de prompt vira roleta-russa em escala."</p>
+</div>
+</section>
+
+<!-- 16 -->
+<section id="glossario"><h2>16 · Glossário</h2>
+<table>
+<tr><th style="width:30%">Termo</th><th>Definição em 1 frase</th></tr>
+<tr><td><code>add_messages</code></td><td>Reducer do LangGraph que concatena listas de mensagens em vez de sobrescrever — essencial para histórico multi-turn.</td></tr>
+<tr><td>AgentExecutor</td><td>Loop ReAct embalado da LangChain; alternativa ao LangGraph com menos controle explícito.</td></tr>
+<tr><td><code>args_schema</code></td><td>Schema Pydantic anexado a uma <code>StructuredTool</code>; vira JSON schema enviado ao LLM.</td></tr>
+<tr><td><code>bind_tools</code></td><td>Método LangChain que associa tools ao modelo e injeta seus schemas no payload da API.</td></tr>
+<tr><td>Checkpointer</td><td>Componente LangGraph que persiste estado por <code>thread_id</code>; <code>MemorySaver</code>, <code>PostgresSaver</code>, etc.</td></tr>
+<tr><td><code>COUNT(DISTINCT)</code></td><td>Conta valores únicos; crítico para evitar inflação após JOINs com cardinalidade N.</td></tr>
+<tr><td>FastAPI</td><td>Framework web Python com tipagem Pydantic nativa, OpenAPI auto-gerado e async support.</td></tr>
+<tr><td>FLOAT64</td><td>Tipo numérico binário IEEE 754; acumula erro em somas decimais — evitar em dinheiro.</td></tr>
+<tr><td>Function Calling</td><td>Sinônimo de Tool Calling — protocolo LLM-decide-função-via-JSON.</td></tr>
+<tr><td>Guardrails</td><td>Regras determinísticas que filtram input/output antes/depois do LLM (recusa, clarificação).</td></tr>
+<tr><td>INNER JOIN</td><td>Mantém só linhas com correspondência em ambas as tabelas; descarta NULLs do lado oposto.</td></tr>
+<tr><td>LangGraph</td><td>Framework de agentes baseado em <code>StateGraph</code> explícito; sucessor de <code>AgentExecutor</code>.</td></tr>
+<tr><td>LEFT JOIN</td><td>Mantém todas as linhas da tabela esquerda mesmo sem correspondência; usado para conversion rate.</td></tr>
+<tr><td><code>MemorySaver</code></td><td>Checkpointer in-memory do LangGraph; perde dados em restart.</td></tr>
+<tr><td>NUMERIC</td><td>Tipo decimal de precisão fixa em BigQuery (38 dígitos, 9 decimais); correto para dinheiro.</td></tr>
+<tr><td>Pyright</td><td>Type checker da Microsoft; mais rápido que mypy, melhor inferência em código moderno.</td></tr>
+<tr><td>Pydantic BaseModel</td><td>Classe base v2 com validação runtime + JSON schema + serialização — core deste projeto.</td></tr>
+<tr><td>RAG</td><td>Retrieval Augmented Generation; pipeline busca-em-vector-DB → injeta no prompt; <em>não</em> usado aqui.</td></tr>
+<tr><td>ReAct</td><td>Padrão Reasoning + Acting: LLM intercala pensamento e ação (tool call) até resposta.</td></tr>
+<tr><td>Reducer</td><td>Função que combina state antigo + state novo em uma chave do <code>StateGraph</code>.</td></tr>
+<tr><td>Router determinístico</td><td>Classificador regex/token-set em Python puro que decide intent antes do LLM.</td></tr>
+<tr><td><code>ScalarQueryParameter</code></td><td>Parâmetro nomeado do cliente BQ; impede SQL injection.</td></tr>
+<tr><td>Short-circuit</td><td>Decisão no <code>preprocess</code> de pular o LLM e responder direto (recusa ou clarificação).</td></tr>
+<tr><td><code>StateGraph</code></td><td>Container do grafo no LangGraph, parametrizado pelo TypedDict do estado.</td></tr>
+<tr><td><code>StructuredTool.from_function</code></td><td>Constrói uma tool LangChain a partir de função Python + <code>args_schema</code> Pydantic.</td></tr>
+<tr><td>Temperature 0</td><td>Determinismo total no sampling do LLM; usado em síntese analítica.</td></tr>
+<tr><td><code>thread_id</code></td><td>Chave de continuidade multi-turn; passada em config do invoke do grafo.</td></tr>
+<tr><td>Tool Calling</td><td>Protocolo onde LLM retorna JSON descrevendo qual função chamar; <strong>não</strong> executa código.</td></tr>
+<tr><td><code>tool_choice="auto"</code></td><td>LLM decide se chama tool ou responde direto; permite follow-up sem nova query.</td></tr>
+<tr><td><code>with_fallbacks</code></td><td>LangChain composer que tenta provider primário e cai para secundário em falha.</td></tr>
+</table>
+</section>
+
+<!-- 17 -->
+<section id="referencias"><h2>17 · Referências</h2>
+<h3>Docs oficiais</h3>
+<ul>
+<li>LangGraph — <a href="https://langchain-ai.github.io/langgraph/" target="_blank">langchain-ai.github.io/langgraph</a></li>
+<li>LangGraph concepts — <a href="https://langchain-ai.github.io/langgraph/concepts/" target="_blank">/concepts/</a></li>
+<li>LangChain Tool Calling — <a href="https://python.langchain.com/docs/concepts/tool_calling/" target="_blank">python.langchain.com</a></li>
+<li>StructuredTool — <a href="https://python.langchain.com/docs/how_to/custom_tools/" target="_blank">/how_to/custom_tools/</a></li>
+<li>Pydantic v2 — <a href="https://docs.pydantic.dev/latest/" target="_blank">docs.pydantic.dev</a></li>
+<li>FastAPI — <a href="https://fastapi.tiangolo.com/tutorial/" target="_blank">fastapi.tiangolo.com</a></li>
+<li>BigQuery Python client — <a href="https://cloud.google.com/python/docs/reference/bigquery/latest" target="_blank">cloud.google.com</a></li>
+<li>BigQuery parameterized queries — <a href="https://cloud.google.com/bigquery/docs/parameterized-queries" target="_blank">/parameterized-queries</a></li>
+<li>BigQuery cost best practices — <a href="https://cloud.google.com/bigquery/docs/best-practices-costs" target="_blank">/best-practices-costs</a></li>
+<li>OpenAI function calling — <a href="https://platform.openai.com/docs/guides/function-calling" target="_blank">platform.openai.com</a></li>
+<li>Anthropic tool use — <a href="https://docs.anthropic.com/en/docs/build-with-claude/tool-use" target="_blank">docs.anthropic.com</a></li>
+</ul>
+<h3>Conceitos</h3>
+<ul>
+<li>ReAct paper — <a href="https://arxiv.org/abs/2210.03629" target="_blank">arxiv.org/abs/2210.03629</a></li>
+<li>Anthropic — Building effective agents — <a href="https://www.anthropic.com/research/building-effective-agents" target="_blank">anthropic.com/research</a></li>
+</ul>
+<p style="color:var(--fg-mute);font-size:12px;margin-top:30px">Gerado a partir do repositório local em 2026. Snippets são reproduções fiéis dos arquivos do projeto na data desta geração.</p>
+</section>
+
+<!-- 18 -->
+<section id="notas-revisao"><h2>18 · Notas de revisão (Q&amp;A)</h2>
+<p>Esclarecimentos coletados em revisão de estudo. Cada bloco responde a uma dúvida concreta surgida ao ler as seções anteriores. Use como cola rápida para entrevista.</p>
+
+<h3>18.1 · Agente custom vs <code>create_react_agent</code></h3>
+<div class="card note">
+<p><strong>O que é ReAct.</strong> Padrão "Reasoning + Acting": LLM alterna <em>Thought</em> (raciocínio) → <em>Action</em> (chamar tool com args) → <em>Observation</em> (lê resultado) → repete até resposta final. Hoje "ReAct agent" virou sinônimo do loop <code>LLM → tool → LLM → tool → ... → final</code>, com tool calls em JSON estruturado em vez de texto Thought/Action.</p>
+<p><strong>Onde aparece em produção.</strong> Claude Code, Cursor, Codex/Copilot Workspace, Aider, Cline, ChatGPT (Python sandbox/browse), Claude com tools/MCP, Devin, OpenHands — todos rodam ReAct no núcleo. Diferenças não estão no padrão, mas em <em>tool set</em>, gestão de memória/contexto, layer de planning opcional e orquestração multi-agente. Variantes acadêmicas (Reflexion, Tree of Thoughts, LATS) existem mas produção comercial usa ReAct puro ~95% das vezes.</p>
+<p><strong>O que o agente custom deste projeto adiciona</strong> vs <code>create_react_agent</code> (prebuilt do LangGraph):</p>
+<ul>
+<li>Prompt ramificado por intent (<code>strategy_follow_up</code> tem system prompt diferente de <code>diagnostic_follow_up</code>).</li>
+<li>Contagem manual de iterações no turn corrente → guard <code>_MAX_AGENT_ITERATIONS=3</code> com mensagem amigável.</li>
+<li>Janela de histórico via <code>turn_start_index</code> (envia só o turn atual ao LLM, não o thread inteiro).</li>
+<li>Injeção de <code>router_guidance</code> direto no system prompt (LLM sabe que router já validou datas/canal).</li>
+<li>Observabilidade por node individual (cada node é função Python, traceável separadamente).</li>
+</ul>
+<p><strong>Senioridade.</strong> Não é "consegui fazer short-circuit" — é <em>trade-off consciente</em>. Júnior pega <code>create_react_agent</code> porque é o que o tutorial mostra; sênior abre mão da conveniência por controle e justifica.</p>
+</div>
+
+<h3>18.2 · Por que router determinístico em vez de LLM responder "fora de escopo"</h3>
+<div class="card warn">
+<p>LLM <em>sabe</em> recusar, mas recusa via LLM custa em 4 dimensões:</p>
+<ol>
+<li><strong>Custo.</strong> Toda pergunta absurda ("ROAS do Facebook?") consome tokens input+output. Em escala = dinheiro real.</li>
+<li><strong>Latência.</strong> 1–3 s por chamada LLM. Router responde em microssegundos.</li>
+<li><strong>Determinismo.</strong> LLM pode <em>às vezes</em> aceitar fora de escopo (alucinação), inventar ROAS com dados que não tem. Router nunca erra — é regex.</li>
+<li><strong>Auditoria.</strong> <code>OUT_OF_SCOPE_MESSAGE</code> é constante, não varia por temperatura. Texto previsível para suporte.</li>
+</ol>
+<p>Resumo: router economiza tokens <strong>e</strong> garante recusa confiável.</p>
+</div>
+
+<h3>18.3 · <code>Command(goto=...)</code> dinâmico e a constante <code>END</code></h3>
+<p>Pergunta natural: por que <code>graph.add_edge("preprocess", END)</code> não aparece? Resposta: o destino é decidido em runtime pelo próprio node, via <code>Command</code>.</p>
+<pre><code class="language-python">if _router_decision_short_circuits(router_decision):
+    return Command(update=state_update, goto="__end__")
+return Command(update=state_update, goto="agent")</code></pre>
+<ul>
+<li><code>"__end__"</code> é o sentinel string equivalente à constante <code>END</code> importada de <code>langgraph.graph</code>.</li>
+<li>Quando node retorna <code>Command(goto=X)</code>, LangGraph usa <code>X</code> — <code>add_edge</code> estático fica redundante para esse node.</li>
+<li>Para o Studio/visualização desenhar a aresta tracejada, declare o tipo de retorno como <code>Command[Literal["agent", "__end__"]]</code> ou use <code>add_conditional_edges</code>. Sem isso, funciona mas a visualização perde a aresta.</li>
+<li><strong>"Pode não existir caminho pro fim em runtime?"</strong> Não — é como <code>if/else</code> em código normal: os dois branches existem no binário, só um executa por invocação. <code>tool_executor → agent</code> é estático porque sempre volta, sem decisão.</li>
+</ul>
+
+<h3>18.4 · Router determinístico vs ML/LLM-based — quadro de trade-off</h3>
+<table>
+<tr><th>Dimensão</th><th>Determinístico (regex/tokens)</th><th>ML/LLM-based</th></tr>
+<tr><td>Custo por request</td><td>Zero (Python puro)</td><td>Tokens em <strong>toda</strong> request válida</td></tr>
+<tr><td>Latência</td><td>Microssegundos</td><td>Centenas de ms a segundos</td></tr>
+<tr><td>Reprodutibilidade</td><td>100% — mesma input, mesma output</td><td>Não-determinístico (temperatura, modelo)</td></tr>
+<tr><td>Testabilidade</td><td><code>pytest</code> cobre tudo</td><td>Exige eval suite + dataset</td></tr>
+<tr><td>Tolerância a typo/sinônimo</td><td>Baixa — exige NFKD + listas manuais</td><td>Alta — generaliza nativamente</td></tr>
+<tr><td>Manutenção em cauda longa</td><td>Cresce linear com vocabulário</td><td>Re-treino ou few-shot</td></tr>
+<tr><td>Debugging</td><td>Trivial (leia o regex)</td><td>Difícil (caixa preta)</td></tr>
+</table>
+
+<h3>18.5 · Justificativa pronta para a entrevista (router)</h3>
+<div class="card note">
+<p><strong>Resposta-modelo:</strong> "Considerei LLM-based router. Descartei por 4 razões alinhadas ao case:</p>
+<ol>
+<li><strong>Escopo fechado</strong> — o case define 3 tabelas e 2 perguntas-tipo. O espaço de intents cabe em regex. ML resolve cauda longa que aqui não existe.</li>
+<li><strong>Critério 'fora de escopo'</strong> — o case avalia recusa explícita. Router determinístico recusa CAC/ROAS com 100% de reliability. LLM router daria ~95%, com 5% inventando.</li>
+<li><strong>Custo previsível</strong> — toda request já paga LLM no <code>agent</code>. Adicionar LLM no router dobra custo sem ganho de qualidade aqui.</li>
+<li><strong>Testabilidade</strong> — <code>pytest</code> cobre router. LLM router exigiria eval suite, fora do escopo do MVP.</li>
+</ol>
+<p>Em domínio aberto (suporte ao cliente, copiloto genérico), inverteria — LLM router ganha. Híbrido seria o próximo passo: regex pega óbvios, LLM resolve ambíguos."</p>
+</div>
+
+<h3>18.6 · Como o router classifica (ele <em>não</em> é um node)</h3>
+<p>Router é função pura <code>build_router_decision(question: str) → RouterDecision</code> chamada <strong>dentro</strong> do <code>preprocess_node</code>. Não há node "router" no grafo.</p>
+<pre><code class="language-python">def build_router_decision(question: str) -> RouterDecision:
+    norm = _normalize(question)              # NFKD + lower + strip acentos
+    tokens = set(norm.split())
+
+    if not norm:
+        return RouterDecision(intent="empty", short_circuit=True, ...)
+
+    if tokens & UNSUPPORTED_METRIC_TOKENS:    # CAC, ROAS, CTR, ...
+        return RouterDecision(intent="out_of_scope", short_circuit=True, ...)
+
+    start, end = _parse_dates(norm)           # regex (5 formatos)
+    source = _detect_traffic_source(norm)     # dict de aliases
+
+    if tokens & REVENUE_TOKENS:
+        intent = "channel_performance"
+    elif tokens & VOLUME_TOKENS:
+        intent = "traffic_volume"
+    elif tokens & STRATEGY_TOKENS and has_prev_context:
+        intent = "strategy_follow_up"
+    else:
+        intent = "ambiguous_analytics"
+
+    if intent in ("traffic_volume","channel_performance") and not (start and end):
+        return RouterDecision(intent=intent, short_circuit=True,
+                              response_message=CLARIFY_DATES_MESSAGE)
+
+    return RouterDecision(intent=intent, traffic_source=source,
+                          start_date=start, end_date=end, short_circuit=False)</code></pre>
+<p>Pipeline = monte de <code>if/else</code> + regex + lookups em <code>frozenset</code>. Determinístico de ponta a ponta.</p>
+
+<h3>18.7 · Datas relativas — também via if/regex</h3>
+<pre><code class="language-python">if YESTERDAY_PATTERN.search(norm):
+    end = today() - timedelta(days=1); start = end
+elif m := LAST_N_DAYS_PATTERN.search(norm):
+    n = int(m.group(1))
+    end = today(); start = end - timedelta(days=n)
+elif THIS_MONTH_PATTERN.search(norm):
+    start = today().replace(day=1); end = today()
+elif LAST_MONTH_PATTERN.search(norm):
+    first_this = today().replace(day=1)
+    end = first_this - timedelta(days=1); start = end.replace(day=1)
+elif m := EXPLICIT_DATE_TOKEN_PATTERN.findall(norm):
+    start, end = _parse_explicit(m)</code></pre>
+
+<h3>18.8 · <code>preprocess_node</code> — o que é e por que é determinístico</h3>
+<ul>
+<li>Função Python (não LLM) que roda <strong>antes</strong> do agente.</li>
+<li>Pega <code>question</code> do state.</li>
+<li>Chama <code>build_router_decision(question)</code> (puro Python).</li>
+<li>Atualiza state com <code>router_decision</code>, <code>resolved_question</code>, <code>turn_start_index</code>.</li>
+<li>Se router pediu short-circuit → <code>Command(goto="__end__", update={final_answer: ...})</code>.</li>
+<li>Senão → <code>Command(goto="agent", update=...)</code>.</li>
+</ul>
+<p>É a "porta de entrada barata" antes de gastar tokens. Determinístico porque não há LLM dentro — mesma pergunta gera mesma decisão sempre.</p>
+
+<h3>18.9 · INNER vs LEFT JOIN — receita vs conversion rate</h3>
+<table>
+<tr><th>Métrica</th><th>JOIN correto</th><th>Por quê</th></tr>
+<tr><td>Receita por canal</td><td><code>users INNER JOIN orders</code></td><td>Só quem comprou interessa. Usuários sem pedido não somam receita.</td></tr>
+<tr><td>Conversion rate</td><td><code>users LEFT JOIN orders</code></td><td>Denominador inclui quem <strong>não</strong> comprou. INNER JOIN inflaria a taxa para ~100%.</td></tr>
+</table>
+<pre><code class="language-sql">-- Conversion rate por canal
+SELECT
+  u.traffic_source,
+  COUNT(DISTINCT u.id)                          AS visitors,
+  COUNT(DISTINCT o.order_id)                    AS buyers,   -- ignora NULL
+  SAFE_DIVIDE(COUNT(DISTINCT o.order_id),
+              COUNT(DISTINCT u.id))             AS conv_rate
+FROM `bigquery-public-data.thelook_ecommerce.users` u
+LEFT JOIN `bigquery-public-data.thelook_ecommerce.orders` o
+  ON o.user_id = u.id AND o.status = 'Complete'
+WHERE u.created_at BETWEEN @start AND @end
+GROUP BY u.traffic_source;</code></pre>
+<p class="trap">Sinal de senioridade: trocar de INNER para LEFT quando a métrica muda mostra que você entendeu <em>semântica</em> do JOIN, não copiou padrão.</p>
+
+<h3>18.10 · Pydantic v1 → v2 (o que realmente mudou)</h3>
+<p>v2 é rewrite de 2023. Core reescrito em Rust (<code>pydantic-core</code>), 10–50× mais rápido. Não tem relação com LangGraph. Entrevistador testa porque muito código legado ainda em v1 e migração é dolorida.</p>
+<table>
+<tr><th>v1</th><th>v2</th></tr>
+<tr><td><code>.dict()</code></td><td><code>.model_dump()</code></td></tr>
+<tr><td><code>.parse_obj()</code></td><td><code>.model_validate()</code></td></tr>
+<tr><td><code>@validator</code></td><td><code>@field_validator</code></td></tr>
+<tr><td><code>@root_validator</code></td><td><code>@model_validator</code></td></tr>
+<tr><td><code>class Config:</code></td><td><code>model_config = ConfigDict(...)</code></td></tr>
+</table>
+
+<h3>18.11 · Justificativas de stack — frases prontas</h3>
+<div class="card note">
+<ul>
+<li><strong>LangGraph &gt; LangChain AgentExecutor:</strong> "LangGraph expõe nodes/edges/state explícitos. Permite preprocess determinístico, guard de iteração e prompts ramificados por intent. <code>AgentExecutor</code> esconde o loop ReAct numa classe — sem hook fácil para short-circuit."</li>
+<li><strong>FastAPI &gt; Flask:</strong> "Pydantic v2 nativo, ASGI async, OpenAPI auto. Schemas das tools (que o LLM vê) reutilizam os mesmos modelos da API."</li>
+<li><strong>MemorySaver:</strong> "Case não exige durabilidade. <code>MemorySaver</code> = zero infra, suficiente para o MVP. Próximo passo declarado: Redis/Postgres."</li>
+<li><strong>Tool calling &gt; LLM gera SQL:</strong> "Segurança (sem injection), custo BQ previsível (bytes scanned controlados), determinismo (SQL testável), auditável."</li>
+<li><strong>NUMERIC &gt; FLOAT64:</strong> "Dinheiro. FLOAT64 = IEEE 754 binário, acumula erro em soma de N pedidos. NUMERIC = decimal precisão fixa."</li>
+<li><strong>Fallback de provider</strong> (<code>with_fallbacks</code>): "Resiliência sem code change. Se OpenAI cair, request continua via Anthropic."</li>
+</ul>
+<p>Regra: sempre mostre que <em>conhece a alternativa</em>, <em>descartou conscientemente</em> e sabe <em>quando inverteria</em> a decisão.</p>
+</div>
+
+<h3>18.12 · Eval suite — o que é</h3>
+<p>Conjunto de testes para LLM/agente. Análogo a test suite de código, mas para comportamento não-determinístico.</p>
+<ul>
+<li><strong>Dataset:</strong> pares <code>(input, expected_output)</code> ou <code>(input, rubric)</code>. Ex: pergunta → intent esperada, tool esperada, métricas no resultado.</li>
+<li><strong>Runner:</strong> executa agente em cada caso, coleta resposta.</li>
+<li><strong>Judge:</strong> assertiva exata (intent correto) ou LLM-as-judge (resposta cobre os pontos?).</li>
+<li><strong>Métricas:</strong> accuracy, tool selection rate, hallucination rate, latência, custo.</li>
+<li><strong>Regression gate:</strong> CI roda eval em cada PR. Bloqueia merge se cair abaixo de threshold.</li>
+</ul>
+
+<h3>18.13 · Cache LRU — funcionamento</h3>
+<p>LRU = <em>Least Recently Used</em>. Cache de tamanho fixo que descarta o item acessado há mais tempo quando enche.</p>
+<ul>
+<li>Estrutura: hash map + doubly-linked list (ou <code>OrderedDict</code>). Operações O(1).</li>
+<li><code>get(key)</code>: se existe, move pra frente da lista, retorna valor.</li>
+<li><code>put(key, val)</code>: insere na frente. Se passou de <code>maxsize</code>, remove o último.</li>
+<li>No projeto: <code>@lru_cache</code> em <code>get_persistent_analytics_graph()</code> (singleton do grafo compilado).</li>
+</ul>
+<pre><code class="language-python">from functools import lru_cache
+
+@lru_cache(maxsize=128)
+def cached_query(tool_name: str, source: str, start: str, end: str): ...</code></pre>
+<p><strong>Aplicação futura em queries BQ:</strong> key = <code>(tool_name, traffic_source, start_date, end_date)</code>, value = resultado. Hit economiza scan BQ (latência + custo). Tradeoff: stale data. Aceitável para ranges fechados no passado, arriscado para "hoje" (precisa TTL adicional).</p>
+
+<h3>18.14 · Langsmith — utilidade neste projeto</h3>
+<div class="card note">
+<p>Langsmith = plataforma de eval + observability para apps LLM (LangChain Inc, integração nativa com LangGraph). Alternativas equivalentes: Langfuse (open-source), Braintrust, Helicone.</p>
+<p><strong>1. Tracing/observability (dia 1):</strong></p>
+<ul>
+<li>Cada <code>graph.invoke</code> vira trace hierárquico: <code>preprocess → agent (LLM) → tool_executor (BQ) → agent (final)</code>.</li>
+<li>Inputs/outputs por node, tokens, latência por step, custo USD.</li>
+<li>Filtros: "todas requests &gt;5s", "todas que usaram <code>channel_performance_analyzer</code>".</li>
+<li>Substitui o header <code>X-Debug</code> com algo muito mais rico, via decorator <code>@traceable</code> ou auto-instrumentation.</li>
+</ul>
+<p><strong>2. Datasets + eval suite (próximo passo):</strong></p>
+<ul>
+<li>Coleta perguntas reais de produção como dataset.</li>
+<li>Evaluators assertivos (intent == esperada, tool == esperada, args == esperados) + LLM-as-judge (resposta menciona canal correto? tem leitura de negócio?).</li>
+<li>CI roda eval em cada PR. Bloqueia merge se accuracy cai.</li>
+</ul>
+<p><strong>3. Regression catch ao trocar modelo:</strong> roda 200 casos em <code>gpt-4o-mini</code> e <code>claude-haiku</code>, compara métricas, decide com dado em vez de fé.</p>
+<p><strong>4. Prompt iteration:</strong> playground edita prompt, roda contra dataset, vê diff antes de mergear.</p>
+<p><strong>Frase de entrevista:</strong> "Langsmith resolveria dois gaps atuais: observability granular por node em produção, e eval suite com regression gate em CI. Sem isso, qualquer troca de modelo ou tweak de prompt vira roleta-russa em escala."</p>
+</div>
+
+<h3>18.15 · ReAct em agentes de código modernos</h3>
+<p>Padrão dominante hoje. Todos rodam loop <code>LLM → tool → LLM → tool → ... → final</code>:</p>
+<table>
+<tr><th>Produto</th><th>Tool set típico</th></tr>
+<tr><td>Claude Code, Cursor, Aider, Cline</td><td>Read, Edit, Write, Bash, Grep, Glob</td></tr>
+<tr><td>ChatGPT (Code Interpreter, Browse, Plugins)</td><td>Python sandbox, web search, image gen</td></tr>
+<tr><td>Claude.ai com tools/MCP</td><td>MCP servers (filesystem, GitHub, DBs, ...)</td></tr>
+<tr><td>Devin, OpenHands</td><td>ReAct + planning layer + browser/terminal</td></tr>
+</table>
+<p>Diferenças não estão no padrão, mas em: tool set, gestão de contexto/memória, planning opcional antes do loop, orquestração multi-agente. Variantes acadêmicas (Reflexion, Tree of Thoughts, LATS) existem mas raramente chegam à produção — ReAct puro ganha por simplicidade.</p>
+</section>
+
+</main>
+
+<aside class="toc" id="toc" aria-label="Sumário da seção atual">
+  <div class="toc-label">Nesta página</div>
+  <a href="#visao-geral">Visão geral</a>
+  <a href="#arquitetura">Arquitetura</a>
+  <a href="#fluxo-pergunta">Fluxo</a>
+  <a href="#langgraph">LangGraph</a>
+  <a href="#tool-calling">Tool Calling</a>
+  <a href="#router">Router</a>
+  <a href="#multi-turn">Multi-turn</a>
+  <a href="#sql">SQL/BQ</a>
+  <a href="#backend">Backend</a>
+  <a href="#pydantic">Pydantic</a>
+  <a href="#produto">Produto</a>
+  <a href="#simulador">Simulador</a>
+  <a href="#decisoes">Decisões</a>
+  <a href="#qa">Q&amp;A</a>
+  <a href="#limitacoes">Limitações</a>
+  <a href="#glossario">Glossário</a>
+  <a href="#referencias">Referências</a>
+  <a href="#notas-revisao">Notas de revisão (Q&amp;A)</a>
+</aside>
+
+</div>
+
+<!-- Drawer (preenchido via JS) -->
+<dialog class="drawer" id="node-drawer">
+  <div class="drawer-close">
+    <strong id="drawer-title">—</strong>
+    <button id="drawer-close-btn" aria-label="Fechar painel">Fechar (Esc)</button>
+  </div>
+  <div class="drawer-inner" id="drawer-body"></div>
+</dialog>
+
+<!-- Snippets para o drawer -->
+<template id="node-preprocess">
+  <p><span class="pill acc">preprocess</span> &nbsp;<span class="filepath">app/graph/workflow.py:851</span></p>
+  <h3>Responsabilidade</h3>
+  <p>Resolver a pergunta canônica do turn, chamar o router determinístico e decidir se a conversa <em>nem chega</em> ao LLM (short-circuit) ou flui para o <code>agent</code>.</p>
+  <h3>Snippet</h3>
+  <pre><code class="language-python">def preprocess_node(state) -> Command[Literal["agent","__end__"]]:
+    question = _resolve_question(state)
+    turn_start_index = _resolve_turn_start_index(state)
+    injected_messages = _build_turn_question_messages(state)
+    resolved_question, router_decision = _resolve_router_turn(state, question)
+
+    state_update = {
+        "router_decision": _serialize_router_decision(router_decision),
+        "resolved_question": resolved_question,
+        "turn_start_index": turn_start_index,
+        "debug_errors": [],
+    }
+    if injected_messages:
+        state_update["messages"] = injected_messages
+
+    if _router_decision_short_circuits(router_decision):
+        state_update["final_answer"] = (
+            router_decision.response_message or EMPTY_QUESTION_MESSAGE
+        )
+        state_update["tools_used"] = []
+        return Command(update=state_update, goto="__end__")
+
+    return Command(update=state_update, goto="agent")</code></pre>
+  <h3>Por que existe</h3>
+  <ul>
+    <li>Economia de tokens: perguntas fora de escopo nunca pagam custo de LLM.</li>
+    <li>Determinismo: clarificação de datas é regex, não interpretação probabilística.</li>
+    <li>Guard de schema: <code>ROAS</code>, <code>campanha</code>, etc são recusados de forma consistente.</li>
+    <li>Merge de follow-up: combina turn atual com pergunta anterior quando aplicável.</li>
+  </ul>
+  <h3>State lido/escrito</h3>
+  <p><strong>Lê</strong>: <code>question</code>, <code>messages</code>, <code>router_decision</code> (prévio, para follow-up). <strong>Escreve</strong>: <code>router_decision</code>, <code>resolved_question</code>, <code>turn_start_index</code>, <code>messages</code> (append), <code>final_answer</code> (se short-circuit).</p>
+</template>
+
+<template id="node-agent">
+  <p><span class="pill acc">agent</span> &nbsp;<span class="filepath">app/graph/workflow.py:880</span></p>
+  <h3>Responsabilidade</h3>
+  <p>Invocar o LLM com tools bound (<code>tool_choice="auto"</code>), decidir entre <em>chamar tool</em> ou <em>produzir resposta final</em>, e aplicar guard de iteração.</p>
+  <h3>Snippet — guard + invocação</h3>
+  <pre><code class="language-python">def agent_node(state) -> Command[Literal["tool_executor","__end__"]]:
+    iterations = _count_agent_iterations_in_turn(state)
+    if iterations >= _MAX_AGENT_ITERATIONS:  # = 3
+        return Command(update={
+            "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+            "tools_used": _collect_tools_used(_get_current_turn_messages(state)),
+            "debug_errors": [_build_debug_error("agent",
+                message=f"Limite de {_MAX_AGENT_ITERATIONS} iteracoes atingido")],
+        }, goto="__end__")
+
+    llm_input = [SystemMessage(content=agent_system_prompt)]
+    router_guidance = _build_router_guidance_message(router_decision,
+                          resolved_question=resolved_question)
+    if router_guidance: llm_input.append(SystemMessage(content=router_guidance))
+    llm_input.extend(_build_follow_up_system_messages(state, router_decision))
+    llm_input += agent_turn_messages
+
+    response = cast(AIMessage, resolved_agent_llm.invoke(llm_input))
+
+    if response.tool_calls:
+        return Command(update={"messages": [response]}, goto="tool_executor")
+
+    # Sem tool_call: resposta final.
+    return Command(update={
+        "messages": [response],
+        "final_answer": _content_to_text(response.content).strip(),
+        "tools_used": _collect_tools_used([...] + [response]),
+    }, goto="__end__")</code></pre>
+  <h3>Por que existe</h3>
+  <ul>
+    <li>É onde tool calling acontece — o LLM <em>escolhe</em> qual tool, com quais args.</li>
+    <li>Guard de 3 iterações previne loop infinito agent↔tool_executor.</li>
+    <li>Injeta system messages condicionais (follow-up estratégico vs diagnóstico).</li>
+    <li>Trata timeout via <code>LlmTimeoutError</code> separadamente de outras exceções.</li>
+  </ul>
+  <h3>State lido/escrito</h3>
+  <p><strong>Lê</strong>: <code>messages</code>, <code>router_decision</code>, <code>resolved_question</code>, <code>turn_start_index</code>. <strong>Escreve</strong>: <code>messages</code> (append AIMessage), <code>final_answer</code> ou roteia para tool_executor.</p>
+</template>
+
+<template id="node-tool_executor">
+  <p><span class="pill acc">tool_executor</span> &nbsp;<span class="filepath">app/graph/workflow.py:985</span></p>
+  <h3>Responsabilidade</h3>
+  <p>Resolver cada <code>tool_call</code> do último <code>AIMessage</code>, validar args via Pydantic, executar a função real e empacotar resultado em <code>ToolMessage</code>.</p>
+  <h3>Snippet</h3>
+  <pre><code class="language-python">def tool_executor_node(state) -> dict[str, Any]:
+    messages = list(state.get("messages", []))
+    # Encontra último AIMessage com tool_calls
+    last_ai_message = next(
+        (m for m in reversed(messages)
+         if isinstance(m, AIMessage) and m.tool_calls), None
+    )
+    if last_ai_message is None:
+        raise ToolExecutionError(TEMPORARY_TOOL_FAILURE_MESSAGE,
+            error_type="MissingToolCallError", ...)
+
+    tool_messages = []
+    for tool_call in last_ai_message.tool_calls:
+        tool = tools_by_name.get(tool_call["name"])
+        if tool is None:
+            raise ToolExecutionError(...)  # UnknownToolError
+        try:
+            result = tool.invoke(tool_call["args"])
+            tool_messages.append(ToolMessage(
+                tool_call_id=tool_call.get("id") or tool_call["name"],
+                name=tool_call["name"],
+                content=json.dumps(result, ensure_ascii=False, indent=2),
+                artifact=result,
+            ))
+        except Exception as exc:
+            raise ToolExecutionError(...) from exc
+
+    return {"messages": tool_messages}</code></pre>
+  <h3>Por que existe</h3>
+  <ul>
+    <li>Isola execução de SQL do LLM — auditável, testável.</li>
+    <li>Encapsula erros em <code>ToolExecutionError</code> com tool_name + error_type para o handler HTTP.</li>
+    <li>Serializa resultado como JSON no <code>content</code> (consumido pelo LLM) mas preserva <code>artifact</code> tipado.</li>
+    <li>Loop volta para <code>agent</code> via edge estático.</li>
+  </ul>
+  <h3>State lido/escrito</h3>
+  <p><strong>Lê</strong>: <code>messages</code>, <code>resolved_question</code>. <strong>Escreve</strong>: <code>messages</code> (append ToolMessage), <code>debug_errors</code> (em raise).</p>
+</template>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/languages/sql.min.js"></script>
+
+<script>
+// ============================================================
+// Mermaid + drawer
+// ============================================================
+mermaid.initialize({
+  startOnLoad: true,
+  securityLevel: "loose",
+  theme: "dark",
+  themeVariables: {
+    background: "#0a0a0b",
+    primaryColor: "#16161a",
+    primaryTextColor: "#e6e6ea",
+    primaryBorderColor: "#5eead4",
+    lineColor: "#5eead4",
+    secondaryColor: "#1d1d22",
+    tertiaryColor: "#16161a",
+    fontFamily: "ui-monospace, monospace",
+  },
+  flowchart: { curve: "basis", padding: 12 },
+});
+
+const NODE_TEMPLATES = {
+  preprocess: "node-preprocess",
+  agent: "node-agent",
+  tool_executor: "node-tool_executor",
+};
+
+const drawer = document.getElementById("node-drawer");
+const drawerBody = document.getElementById("drawer-body");
+const drawerTitle = document.getElementById("drawer-title");
+document.getElementById("drawer-close-btn").addEventListener("click", () => drawer.close());
+drawer.addEventListener("click", (e) => {
+  const rect = drawer.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+    drawer.close();
+  }
+});
+
+window.onMermaidNode = function(nodeKey){ openNode(nodeKey); };
+
+function openNode(nodeKey) {
+  const tpl = document.getElementById(NODE_TEMPLATES[nodeKey]);
+  if (!tpl) return;
+  drawerBody.innerHTML = "";
+  drawerBody.appendChild(tpl.content.cloneNode(true));
+  drawerTitle.textContent = nodeKey;
+  drawerBody.querySelectorAll("pre code").forEach((b) => { try { hljs.highlightElement(b); } catch (e) {} });
+  drawer.showModal();
+}
+
+// After mermaid renders, attach click handlers by matching node text content.
+function wireDiagramClicks() {
+  const svg = document.querySelector("#flow-diagram svg");
+  if (!svg) return;
+  svg.querySelectorAll("g.node").forEach((g) => {
+    const label = (g.textContent || "").trim().toLowerCase();
+    let key = null;
+    if (label.includes("preprocess")) key = "preprocess";
+    else if (label === "agent") key = "agent";
+    else if (label.includes("tool_executor")) key = "tool_executor";
+    if (key) {
+      g.style.cursor = "pointer";
+      g.addEventListener("click", () => openNode(key));
+    }
+  });
+}
+
+// Mermaid finishes async — observe DOM for svg insertion.
+const obsTarget = document.getElementById("flow-diagram");
+if (obsTarget) {
+  const obs = new MutationObserver(() => {
+    if (obsTarget.querySelector("svg")) {
+      wireDiagramClicks();
+      obs.disconnect();
+    }
+  });
+  obs.observe(obsTarget, { childList: true, subtree: true });
+}
+
+// ============================================================
+// Sidebar search + scrollspy
+// ============================================================
+const searchInput = document.getElementById("nav-search");
+const navLinks = document.querySelectorAll("#nav a");
+searchInput.addEventListener("input", () => {
+  const q = searchInput.value.trim().toLowerCase();
+  navLinks.forEach((a) => {
+    a.style.display = !q || a.textContent.toLowerCase().includes(q) ? "" : "none";
+  });
+});
+
+const sections = Array.from(document.querySelectorAll("main section[id]"));
+const tocLinks = document.querySelectorAll("#toc a, #nav a");
+const spy = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (e.isIntersecting) {
+      const id = e.target.id;
+      tocLinks.forEach((a) => {
+        a.classList.toggle("active", a.getAttribute("href") === "#" + id);
+      });
+    }
+  });
+}, { rootMargin: "-30% 0px -60% 0px" });
+sections.forEach((s) => spy.observe(s));
+
+// ============================================================
+// Highlight code blocks
+// ============================================================
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("pre code").forEach((b) => {
+    try { hljs.highlightElement(b); } catch (e) {}
+  });
+});
+
+// ============================================================
+// Router simulator — JS port simplificado de app/graph/router.py
+// ============================================================
+
+const UNSUPPORTED_METRIC_TOKENS = new Set([
+  "cac","roas","roi","ltv","ctr","cpc","cpm",
+  "impressao","impressoes","impression","impressions",
+  "clique","cliques","click","clicks",
+  "empresa","empresas","company","companies",
+]);
+const UNSUPPORTED_DIMENSION_TOKENS = new Set([
+  "campanha","campanhas","campaign","campaigns",
+  "anuncio","anuncios","ad","ads",
+  "criativo","criativos","creative","creatives",
+]);
+const SUPPORTED_CHANNEL_TOKENS = new Set(["canal","canais","channel","channels"]);
+const SUPPORTED_VOLUME_SIGNAL_TOKENS = new Set(["trafego","traffic","volume"]);
+const SUPPORTED_USER_METRIC_TOKENS = new Set(["usuario","usuarios","user","users"]);
+const SUPPORTED_PERFORMANCE_METRIC_TOKENS = new Set([
+  "pedido","pedidos","order","orders","receita","revenue","ranking",
+  "performance","desempenho","melhor","top","venda","vendas","vendeu",
+  "faturou","faturamento","faturar","financeiro","financeira",
+]);
+const SUPPORTED_SOURCE_TOKENS = new Set([
+  "search","google","googleads","google_ads","adwords",
+  "organic","seo","facebook","fb","instagram",
+]);
+const SUPPORTED_COMPARISON_TOKENS = new Set([
+  "compare","comparar","comparacao","comparison","versus","vs",
+]);
+const SOURCE_ALIASES = {
+  search: "Search", google: "Search", googleads: "Search",
+  google_ads: "Search", adwords: "Search",
+  organic: "Organic", seo: "Organic",
+  facebook: "Facebook", fb: "Facebook", instagram: "Instagram",
+};
+const STRATEGY_TOKENS = new Set([
+  "acao","acoes","plano","priorizar","prioridade","recomendacao","recomendacoes",
+  "recomenda","recomendar","sugestao","sugestoes","proximo","proximos","passo",
+  "passos","melhorar","fortalecer","otimizar","otimizacao","estrategia","estrategias",
+]);
+const DIAGNOSTIC_TOKENS = new Set([
+  "causa","causas","explica","explicar","explicacao","motivo","motivos",
+  "hipotese","hipoteses","diagnostico","diagnostica","fator","fatores","razao","razoes",
+]);
+const DIAGNOSTIC_PHRASE = /\b(?:por que|porque|o que explica|como explicar|qual a explicacao)\b/;
+
+const EXPLICIT_DATE_RE = /\b(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{2}(?:\d{2})?)\b/g;
+const YESTERDAY_RE = /\bontem\b/;
+const THIS_MONTH_RE = /\beste\s+mes\b/;
+const LAST_MONTH_RE = /\bultimo\s+mes\b/;
+const LAST_N_DAYS_RE = /\bultimos?\s+(\d+)\s+dias?\b/;
+
+function normalizeText(s){
+  return s.normalize("NFKD").replace(/[̀-ͯ]/g,"").toLowerCase();
+}
+function tokens(s){
+  return new Set(normalizeText(s).match(/[a-z0-9_]+/g) || []);
+}
+function setHas(set, candidates){
+  for (const c of candidates) if (set.has(c)) return true;
+  return false;
+}
+function setIntersect(a, b){
+  const out = [];
+  for (const x of a) if (b.has(x)) out.push(x);
+  return out;
+}
+function parseISO(d){
+  // d = "YYYY-MM-DD"
+  const [y,m,dd] = d.split("-").map(Number);
+  const date = new Date(Date.UTC(y,m-1,dd));
+  if (date.getUTCFullYear()!==y || date.getUTCMonth()!==m-1 || date.getUTCDate()!==dd) return null;
+  return date;
+}
+function parseDMY(d){
+  const parts = d.split("/");
+  if (parts.length !== 3) return null;
+  let [dd,mm,yy] = parts.map(Number);
+  if (yy < 100) yy += 2000;
+  const date = new Date(Date.UTC(yy,mm-1,dd));
+  if (date.getUTCFullYear()!==yy || date.getUTCMonth()!==mm-1 || date.getUTCDate()!==dd) return null;
+  return date;
+}
+function fmt(d){ return d.toISOString().slice(0,10); }
+function extractDates(q){
+  const valid = [], invalid = [];
+  const matches = q.match(EXPLICIT_DATE_RE) || [];
+  for (const tok of matches){
+    let d = null;
+    if (tok.includes("-")) d = parseISO(tok);
+    else d = parseDMY(tok);
+    if (d) valid.push(d); else invalid.push(tok);
+  }
+  return {valid, invalid};
+}
+function extractRelative(qNorm, today){
+  // returns [start,end] or null
+  if (YESTERDAY_RE.test(qNorm)){
+    const y = new Date(today); y.setUTCDate(y.getUTCDate()-1);
+    return [y,y];
+  }
+  if (LAST_MONTH_RE.test(qNorm)){
+    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth()-1, 1));
+    const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
+    return [start,end];
+  }
+  if (THIS_MONTH_RE.test(qNorm)){
+    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    return [start, today];
+  }
+  const m = qNorm.match(LAST_N_DAYS_RE);
+  if (m){
+    const n = parseInt(m[1],10);
+    if (n>0){
+      const start = new Date(today); start.setUTCDate(start.getUTCDate()-(n-1));
+      return [start, today];
+    }
+  }
+  return null;
+}
+function extractTrafficSource(qNorm){
+  const toks = qNorm.match(/[a-z0-9_]+/g) || [];
+  const found = [];
+  for (const t of toks){
+    const alias = SOURCE_ALIASES[t];
+    if (alias && !found.includes(alias)) found.push(alias);
+  }
+  return found.length === 1 ? found[0] : null;
+}
+function requestsUnsupportedDim(toks, q){
+  if (setIntersect(toks, UNSUPPORTED_DIMENSION_TOKENS).length) return true;
+  return false;
+}
+
+function classify(qRaw){
+  const trace = [];
+  const q = (qRaw || "").trim();
+  if (!q){
+    return {
+      intent:"out_of_scope", refusal:"empty_question",
+      params:{traffic_source:null, start_date:null, end_date:null},
+      tool:null, message:"Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise.",
+      trace:["pergunta vazia → empty_question"],
+    };
+  }
+  const qNorm = normalizeText(q);
+  const toks = tokens(q);
+  trace.push(`tokens: {${[...toks].slice(0,12).join(", ")}${toks.size>12?", ...":""}}`);
+
+  // 1. Dimensão não suportada
+  if (requestsUnsupportedDim(toks, q)){
+    const hit = setIntersect(toks, UNSUPPORTED_DIMENSION_TOKENS);
+    trace.push(`token \`${hit[0]}\` ∈ UNSUPPORTED_DIMENSION_TOKENS → out_of_scope/unsupported_dimension`);
+    return {intent:"out_of_scope", refusal:"unsupported_dimension", tool:null,
+      params:extractParams(q,qNorm),
+      message:"No MVP atual eu so consigo analisar trafego, pedidos e receita por canal (traffic_source).",
+      trace};
+  }
+
+  // 2. Métrica não suportada
+  const badMetric = setIntersect(toks, UNSUPPORTED_METRIC_TOKENS);
+  if (badMetric.length){
+    trace.push(`token \`${badMetric[0]}\` ∈ UNSUPPORTED_METRIC_TOKENS → out_of_scope/unsupported_metric`);
+    return {intent:"out_of_scope", refusal:"unsupported_metric", tool:null,
+      params:extractParams(q,qNorm),
+      message:"No MVP atual eu so consigo analisar volume de trafego, pedidos e receita por canal.",
+      trace};
+  }
+
+  // 3. Strategy / diagnostic follow-ups (heurística simples — sem checar histórico aqui)
+  const isStrategy = setIntersect(toks, STRATEGY_TOKENS).length > 0;
+  const isDiagnostic = setIntersect(toks, DIAGNOSTIC_TOKENS).length > 0 || DIAGNOSTIC_PHRASE.test(qNorm);
+  const hasAnchor = setIntersect(toks, SUPPORTED_CHANNEL_TOKENS).length
+                 || setIntersect(toks, SUPPORTED_SOURCE_TOKENS).length
+                 || setIntersect(toks, SUPPORTED_VOLUME_SIGNAL_TOKENS).length
+                 || setIntersect(toks, SUPPORTED_PERFORMANCE_METRIC_TOKENS).length;
+  if (isStrategy && hasAnchor){
+    trace.push("tokens estratégicos + anchor analítico → strategy_follow_up (depende de contexto prévio no thread real)");
+    return {intent:"strategy_follow_up", refusal:null, tool:null,
+      params:extractParams(q,qNorm),
+      message:"(no fluxo real: usa contexto anterior do thread para responder sem tool_call)",
+      trace};
+  }
+  if (isDiagnostic && hasAnchor){
+    trace.push("tokens diagnósticos + anchor analítico → diagnostic_follow_up (depende de contexto prévio no thread real)");
+    return {intent:"diagnostic_follow_up", refusal:null, tool:null,
+      params:extractParams(q,qNorm),
+      message:"(no fluxo real: leitura diagnóstica baseada no contexto do thread)",
+      trace};
+  }
+
+  // 4. Classificação principal de intent
+  const hasVolume = setIntersect(toks, SUPPORTED_VOLUME_SIGNAL_TOKENS).length || setIntersect(toks, SUPPORTED_USER_METRIC_TOKENS).length;
+  const hasPerf = setIntersect(toks, SUPPORTED_PERFORMANCE_METRIC_TOKENS).length;
+  const sourceMentions = setIntersect(toks, SUPPORTED_SOURCE_TOKENS);
+  const hasComparison = setIntersect(toks, SUPPORTED_COMPARISON_TOKENS).length;
+  const hasSupportedContext = hasVolume || hasPerf || setIntersect(toks, SUPPORTED_CHANNEL_TOKENS).length || sourceMentions.length;
+
+  let intent;
+  if (hasComparison && sourceMentions.length >= 2){ intent = "channel_performance"; trace.push("comparação + ≥2 canais → channel_performance"); }
+  else if (hasPerf){ intent = "channel_performance"; trace.push("token de performance → channel_performance"); }
+  else if (hasVolume){ intent = "traffic_volume"; trace.push("token de volume/usuário → traffic_volume"); }
+  else if (hasSupportedContext){ intent = "ambiguous_analytics"; trace.push("contexto analítico presente mas métrica ambígua → ambiguous_analytics"); }
+  else { intent = "out_of_scope"; trace.push("sem sinais analíticos → out_of_scope"); }
+
+  const params = extractParams(q, qNorm);
+
+  if (intent === "out_of_scope"){
+    return {intent, refusal:"out_of_scope", tool:null, params,
+      message:"Consigo ajudar apenas com analises de trafego, pedidos e receita por canal no dataset atual.",
+      trace};
+  }
+
+  // 5. Validar datas
+  const {valid, invalid} = extractDates(q);
+  if (invalid.length){
+    trace.push(`datas inválidas: ${invalid.join(", ")} → clarification/invalid_dates`);
+    return {intent, refusal:null, clarification:"invalid_dates", tool:null, params,
+      message:"As datas informadas sao invalidas. Use datas reais em YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA ou periodos relativos suportados.",
+      trace};
+  }
+  if (valid.length >= 2 && valid[0] > valid[1]){
+    trace.push("start_date > end_date → clarification/invalid_dates");
+    return {intent, refusal:null, clarification:"invalid_dates", tool:null, params,
+      message:"As datas informadas sao invalidas. start_date deve ser ≤ end_date.",
+      trace};
+  }
+  if (!params.start_date || !params.end_date){
+    trace.push("intent válida mas faltam datas → clarification/missing_dates");
+    return {intent, refusal:null, clarification:"missing_dates", tool:null, params,
+      message:"Preciso que voce informe o periodo para eu consultar os dados. Voce pode usar YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA ou periodos relativos como ontem, este mes, ultimo mes e ultimos 7 dias.",
+      trace};
+  }
+
+  if (intent === "ambiguous_analytics"){
+    trace.push("agente vai pedir clarificação curta entre volume vs performance financeira");
+    return {intent, refusal:null, clarification:"ambiguous_metric", tool:null, params,
+      message:"(agente pede clarificação: volume de usuários ou performance financeira?)",
+      trace};
+  }
+
+  // 6. Resolved — agent vai chamar a tool
+  const tool = intent === "channel_performance" ? "channel_performance_analyzer" : "traffic_volume_analyzer";
+  trace.push(`intent resolvida + datas + traffic_source=${params.traffic_source ?? "(null, agregado)"} → agent chamará ${tool}`);
+  return {intent, refusal:null, tool, params, message:null, trace};
+}
+
+function extractParams(q, qNorm){
+  const {valid} = extractDates(q);
+  let start = null, end = null;
+  if (valid.length >= 2){ start = valid[0]; end = valid[1]; }
+  else if (valid.length === 1){ start = valid[0]; end = valid[0]; }
+  else {
+    const rel = extractRelative(qNorm, new Date());
+    if (rel){ start = rel[0]; end = rel[1]; }
+  }
+  return {
+    traffic_source: extractTrafficSource(qNorm),
+    start_date: start ? fmt(start) : null,
+    end_date: end ? fmt(end) : null,
+  };
+}
+
+// UI
+const simInput = document.getElementById("sim-input");
+const simResult = document.getElementById("sim-result");
+const intentColors = {
+  traffic_volume: "info",
+  channel_performance: "acc",
+  ambiguous_analytics: "warn",
+  out_of_scope: "danger",
+  strategy_follow_up: "purple",
+  diagnostic_follow_up: "purple",
+};
+
+function renderResult(r){
+  const intentPill = `<span class="pill ${intentColors[r.intent] || ""}">${r.intent}</span>`;
+  let shortCircuit = "";
+  if (r.refusal) shortCircuit = `<span class="pill danger">refusal:${r.refusal}</span>`;
+  else if (r.clarification) shortCircuit = `<span class="pill warn">clarification:${r.clarification}</span>`;
+  else shortCircuit = `<span class="pill acc">resolvida (sem short-circuit)</span>`;
+
+  const toolRow = r.tool
+    ? `<div class="sim-row"><span class="lbl">tool prevista</span><span><span class="pill acc">→ ${r.tool}</span></span></div>`
+    : `<div class="sim-row"><span class="lbl">tool prevista</span><span style="color:var(--fg-mute)">— (sem tool call no agent)</span></div>`;
+
+  const msgRow = r.message
+    ? `<div class="sim-row"><span class="lbl">mensagem</span><span style="color:var(--fg-dim);font-size:13px">${r.message}</span></div>`
+    : "";
+
+  simResult.innerHTML = `
+    <div class="sim-row"><span class="lbl">intent</span><span>${intentPill}</span></div>
+    <div class="sim-row"><span class="lbl">short_circuit</span><span>${shortCircuit}</span></div>
+    <div class="sim-row"><span class="lbl">traffic_source</span><span><code>${r.params.traffic_source ?? "null"}</code></span></div>
+    <div class="sim-row"><span class="lbl">start_date</span><span><code>${r.params.start_date ?? "null"}</code></span></div>
+    <div class="sim-row"><span class="lbl">end_date</span><span><code>${r.params.end_date ?? "null"}</code></span></div>
+    ${toolRow}
+    ${msgRow}
+    <div class="sim-trace">
+      <div style="font-size:11px;text-transform:uppercase;color:var(--fg-mute);letter-spacing:.06em">Trace</div>
+      <ol>${r.trace.map(t => `<li>${escapeHtml(t)}</li>`).join("")}</ol>
+    </div>
+  `;
+  simResult.hidden = false;
+}
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+document.getElementById("sim-run").addEventListener("click", () => {
+  renderResult(classify(simInput.value));
+});
+document.getElementById("sim-clear").addEventListener("click", () => {
+  simInput.value = ""; simResult.hidden = true;
+});
+simInput.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter"){ renderResult(classify(simInput.value)); }
+});
+
+const EXAMPLES = [
+  "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?",
+  "Como foi o volume de usuarios vindos de Search no ultimo mes?",
+  "Qual foi o ROAS de Search ontem?",
+  "Qual canal teve melhor performance?",
+  "Como o Search performou ontem?",
+  "Quais acoes priorizar?",
+  "Compare Search e Organic entre 01/01/24 e 31/01/24",
+  "Qual a receita por campanha no ultimo mes?",
+];
+const examplesContainer = document.getElementById("sim-examples");
+EXAMPLES.forEach((ex) => {
+  const b = document.createElement("button");
+  b.textContent = ex.length > 48 ? ex.slice(0,46) + "…" : ex;
+  b.title = ex;
+  b.addEventListener("click", () => { simInput.value = ex; renderResult(classify(ex)); simInput.focus(); });
+  examplesContainer.appendChild(b);
+});
+</script>
+</body>
+</html>
