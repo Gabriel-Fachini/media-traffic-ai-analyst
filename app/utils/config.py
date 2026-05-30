@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
 
+    # LangSmith — opt-in tracing. All three vars required to enable.
+    langchain_tracing_v2: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
+    langchain_api_key: str | None = Field(default=None, alias="LANGCHAIN_API_KEY")
+    langchain_project: str | None = Field(default=None, alias="LANGCHAIN_PROJECT")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -118,6 +123,11 @@ class Settings(BaseSettings):
 
         if self.anthropic_api_key:
             os.environ["ANTHROPIC_API_KEY"] = self.anthropic_api_key
+
+        if self.langchain_tracing_v2 and self.langchain_api_key and self.langchain_project:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
+            os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
 
 
 @lru_cache
