@@ -76,21 +76,19 @@ Manter normalizacao de data deterministica.
       `app/graph/date_normalizer.py` e reusar. Datas continuam regex.
       Cobertura ampliada: hoje, esta/ultima semana, ultimas N semanas,
       este/ultimo ano alem dos formatos ja existentes.
-- [ ] 1.4 Passar contexto do thread ao router: ultimas N mensagens / ultimo
+- [x] 1.4 Passar contexto do thread ao router: ultimas N mensagens / ultimo
       resultado de tool, para que o router classifique follow-ups sem token lists.
-- [ ] 1.5 Substituir `build_router_decision` em `_resolve_router_turn`
-      (`app/graph/workflow.py:723`) pela chamada ao router LLM. Guidance continua
-      sendo montada e injetada como `SystemMessage` (sem mudanca no `agent_node`).
-- [ ] 1.6 Deletar a maquinaria de follow-up agora redundante: `_resolve_follow_up_intent`,
-      `_infer_follow_up_intent_from_previous_context`, `_question_has_soft_*`,
-      `_build_agent_clarification_follow_up_question`, merges
-      (`app/graph/workflow.py:418-824`) e todos os frozensets de token em
-      `app/graph/router.py:49-413`.
-- [ ] 1.7 Avaliar fundir `STRATEGY_FOLLOW_UP_SYSTEM_PROMPT` e
-      `DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT` no system prompt principal, ja que o
-      agente passa a ver o thread e o intent vem do router.
-- [ ] 1.8 Cache/curto-circuito barato: pergunta vazia continua tratada sem chamar
-      LLM (guard deterministico antes do router).
+- [x] 1.5 Substituir `build_router_decision` em `_resolve_router_turn`
+      pela chamada ao router LLM. Guidance continua sendo montada e injetada
+      como `SystemMessage` (sem mudanca no `agent_node`).
+- [x] 1.6 Deletar a maquinaria de follow-up agora redundante. `app/graph/router.py`
+      deletado na totalidade; router deterministico movido para `tests/deterministic_router.py`
+      (utilitario de teste). Mensagens canonicas movidas para `app/graph/workflow.py`.
+- [x] 1.7 `STRATEGY_FOLLOW_UP_SYSTEM_PROMPT` e `DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT`
+      fundidos no system prompt principal. `_build_follow_up_system_messages` agora
+      injeta somente o bloco de contexto analitico (dados), sem prompt de instrucao extra.
+- [x] 1.8 Guard deterministico antes do router: pergunta vazia short-circuits em
+      `preprocess_node` sem chamar o LLM.
 
 ### Aceite
 

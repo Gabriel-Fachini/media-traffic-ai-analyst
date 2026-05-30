@@ -20,12 +20,15 @@ Entregar um MVP funcional de um agente de analytics para Midia e Growth, capaz d
   - `thread_id` opcional no contrato HTTP
   - continuidade multi-turn em memoria via `MemorySaver`
   - nao ha persistencia duravel entre reinicios do processo
-- Formatos temporais suportados no roteamento:
+- Roteamento: LLM-based via `classify_question` em `app/graph/llm_router.py`
+  com `with_structured_output(RouterDecision)`; normalizacao de datas permanece
+  deterministica em `app/graph/date_normalizer.py`
+- Formatos temporais suportados na normalizacao de datas:
   - `YYYY-MM-DD`
   - `DD/MM/AAAA`
   - `DD/MM/AA`
   - `ontem`, `este mes`, `ultimo mes`, `ultimos N dias`
-- Follow-ups suportados:
+- Follow-ups suportados (classificados pelo router LLM com contexto do thread):
   - clarificacao de datas
   - clarificacao guiada de metrica ambigua
   - follow-up estrategico
@@ -51,25 +54,23 @@ Entregar um MVP funcional de um agente de analytics para Midia e Growth, capaz d
 
 ### 4.1 Router Agent
 
-Responsabilidades atuais:
+Implementacao: `app/graph/llm_router.py` — `classify_question(question, thread_context, settings) -> RouterDecision`
 
-- classificar a intencao da pergunta;
-- normalizar `traffic_source`, `start_date` e `end_date`;
-- decidir entre:
+- Classificacao via LLM com `with_structured_output(RouterDecision)`.
+- Contexto do thread (ultimas 6 mensagens nao-system) passado para deteccao de follow-up.
+- Normalizacao de `start_date` e `end_date` permanece deterministica (`app/graph/date_normalizer.py`).
+- Classificacao de intent:
   - `traffic_volume`
   - `channel_performance`
   - `strategy_follow_up`
   - `diagnostic_follow_up`
   - `ambiguous_analytics`
   - `out_of_scope`
-- emitir short-circuit com mensagem pronta quando houver:
-  - pergunta vazia
-  - fora de escopo
-  - dimensao nao suportada
-  - metrica nao suportada
-  - canal nao suportado
-  - datas ausentes
-  - datas invalidas
+- Short-circuits determiniscos (sem chamar LLM) para:
+  - pergunta vazia (guard em `preprocess_node` antes do router)
+- Short-circuits via router LLM (`needs_clarification=True` ou `refusal_reason != None`):
+  - fora de escopo, dimensao nao suportada, metrica nao suportada, canal nao suportado
+  - datas ausentes, datas invalidas
   - ambiguidade entre volume e performance financeira
 
 ### 4.2 Traffic Volume Analyzer Agent
@@ -201,16 +202,17 @@ O comando executa:
   - tool binding do LLM
   - graph/API end-to-end com ambiente configurado
 
-## 9. Mapeamento com as fases
+## 9. Mapeamento com as fases (PLANO_EVOLUCAO.md)
 
-- Fase 1: setup, config e BigQuery client implementados
-- Fase 2: tools implementadas
-- Fase 3: orquestracao LangGraph implementada
-- Fase 4: exposicao FastAPI implementada
-- Fase 5: CLI implementada
-- Entrega final ainda pendente:
-  - consolidacao do `README.md`
-  - acabamento final dos materiais de entrega
+- Fase 0 (eval harness): concluida — `tests/eval/` com `router_cases.jsonl`,
+  `test_router_eval.py` (marker `eval`), baseline documentado.
+- Fase 1 (router LLM): concluida — `app/graph/llm_router.py` (classify_question),
+  `app/graph/date_normalizer.py` (datas deterministicas), `app/graph/router.py`
+  deletado, router deterministico movido para `tests/deterministic_router.py`.
+- Fase 2 (observabilidade + streaming): pendente
+- Fase 3 (tool de visualizacao): pendente
+- Fase 4 (persistencia SqliteSaver): pendente
+- Fase 5 (interface visual de chat): pendente
 
 ## 10. Diretrizes de escopo atuais
 
