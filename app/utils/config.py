@@ -13,7 +13,7 @@ class SettingsError(RuntimeError):
     pass
 
 
-SupportedLlmProvider = Literal["openai", "anthropic"]
+SupportedLlmProvider = Literal["openai", "anthropic", "ollama"]
 
 
 class Settings(BaseSettings):
@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     llm_fallback_model: str | None = Field(default=None, alias="LLM_FALLBACK_MODEL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
+
+    # Ollama — required when LLM_PROVIDER=ollama
+    ollama_base_url: str | None = Field(default=None, alias="OLLAMA_BASE_URL")
+    ollama_api_key: str | None = Field(default=None, alias="OLLAMA_API_KEY")
 
     # LangSmith — opt-in tracing. All three vars required to enable.
     langchain_tracing_v2: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
@@ -58,6 +62,8 @@ class Settings(BaseSettings):
         "openai_api_key",
         "anthropic_api_key",
         "llm_fallback_model",
+        "ollama_base_url",
+        "ollama_api_key",
     )
     @classmethod
     def normalize_optional_string(cls, value: str | None) -> str | None:
@@ -94,6 +100,10 @@ class Settings(BaseSettings):
         if provider == "anthropic" and not self.anthropic_api_key:
             raise SettingsError(
                 "Variavel obrigatoria ausente no ambiente: ANTHROPIC_API_KEY."
+            )
+        if provider == "ollama" and not self.ollama_base_url:
+            raise SettingsError(
+                "Variavel obrigatoria ausente no ambiente: OLLAMA_BASE_URL."
             )
 
     def validate_environment(self) -> None:

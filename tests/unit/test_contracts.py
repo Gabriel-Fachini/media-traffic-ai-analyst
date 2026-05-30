@@ -58,6 +58,37 @@ def test_settings_require_complete_fallback_pair(
         )
 
 
+def test_settings_require_ollama_base_url_when_provider_is_ollama(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_settings_env(monkeypatch)
+
+    settings = _build_settings_for_test(
+        _env_file=None,
+        **{"LLM_PROVIDER": "ollama", "LLM_MODEL": "llama3.1"},
+    )
+
+    with pytest.raises(SettingsError, match="OLLAMA_BASE_URL"):
+        settings.validate_environment()
+
+
+def test_settings_ollama_with_base_url_passes_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear_settings_env(monkeypatch)
+
+    settings = _build_settings_for_test(
+        _env_file=None,
+        **{
+            "LLM_PROVIDER": "ollama",
+            "LLM_MODEL": "llama3.1",
+            "OLLAMA_BASE_URL": "https://ollama.example.com",
+        },
+    )
+    # não levanta — apenas verifica que passa sem erro
+    settings.validate_environment()
+
+
 def test_settings_validate_environment_requires_existing_credentials_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

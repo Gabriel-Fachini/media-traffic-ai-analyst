@@ -85,6 +85,23 @@ def _build_provider_model(
             stop=None,
             api_key=SecretStr(anthropic_api_key),
         )
+    if provider == "ollama":
+        from langchain_ollama import ChatOllama  # lazy import — dep opcional em testes
+
+        if settings.ollama_base_url is None:
+            raise SettingsError("Variavel obrigatoria ausente no ambiente: OLLAMA_BASE_URL.")
+
+        extra_kwargs: dict[str, Any] = {}
+        if settings.ollama_api_key:
+            extra_kwargs["headers"] = {"Authorization": f"Bearer {settings.ollama_api_key}"}
+
+        return ChatOllama(
+            model=model_name,
+            temperature=DEFAULT_LLM_TEMPERATURE,
+            base_url=settings.ollama_base_url,
+            **extra_kwargs,
+        )
+
     raise SettingsError(f"Provider LLM nao suportado: {provider}.")
 
 
