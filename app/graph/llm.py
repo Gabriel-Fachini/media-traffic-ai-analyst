@@ -93,7 +93,9 @@ def _build_provider_model(
 
         extra_kwargs: dict[str, Any] = {}
         if settings.ollama_api_key:
-            extra_kwargs["headers"] = {"Authorization": f"Bearer {settings.ollama_api_key}"}
+            auth_headers = {"Authorization": f"Bearer {settings.ollama_api_key}"}
+            extra_kwargs["client_kwargs"] = {"headers": auth_headers}
+            extra_kwargs["async_client_kwargs"] = {"headers": auth_headers}
 
         return ChatOllama(
             model=model_name,

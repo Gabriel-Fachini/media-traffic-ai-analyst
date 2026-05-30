@@ -13,7 +13,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from app.graph.date_normalizer import normalize_text as _normalize_text
 from tests.deterministic_router import build_router_decision
 from app.graph.workflow import build_analytics_graph
-from app.schemas.router import RouterDecision, RouterNormalizedParams
+from app.schemas.router import RouterDecision
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 
 
@@ -362,12 +362,10 @@ class FakeRouterRunnable:
             ):
                 return RouterDecision(
                     intent="diagnostic_follow_up",
-                    normalized_params=RouterNormalizedParams(),
                 )
             if any(w in normalized_q for w in _STRATEGY_WORDS):
                 return RouterDecision(
                     intent="strategy_follow_up",
-                    normalized_params=RouterNormalizedParams(),
                 )
             # Generic "help me" phrase — infer intent from most recent AI text.
             if any(w in normalized_q for w in _GENERIC_FOLLOW_UP_WORDS):
@@ -379,11 +377,9 @@ class FakeRouterRunnable:
                         ):
                             return RouterDecision(
                                 intent="diagnostic_follow_up",
-                                normalized_params=RouterNormalizedParams(),
                             )
                         return RouterDecision(
                             intent="strategy_follow_up",
-                            normalized_params=RouterNormalizedParams(),
                         )
 
         # Merge with previous HumanMessage only when base has no specific traffic_source.

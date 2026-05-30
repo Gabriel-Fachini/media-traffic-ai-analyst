@@ -577,7 +577,6 @@ def build_router_decision(
     if not question:
         return RouterDecision(
             intent="out_of_scope",
-            normalized_params=RouterNormalizedParams(),
             refusal_reason="empty_question",
             response_message=EMPTY_QUESTION_MESSAGE,
         )
@@ -592,7 +591,9 @@ def build_router_decision(
     if _question_requests_unsupported_dimension(question):
         return RouterDecision(
             intent="out_of_scope",
-            normalized_params=normalized_params,
+            traffic_source=normalized_params.traffic_source,
+            start_date=normalized_params.start_date,
+            end_date=normalized_params.end_date,
             refusal_reason="unsupported_dimension",
             response_message=UNSUPPORTED_DIMENSION_MESSAGE,
         )
@@ -601,7 +602,9 @@ def build_router_decision(
     if question_tokens & UNSUPPORTED_METRIC_TOKENS:
         return RouterDecision(
             intent="out_of_scope",
-            normalized_params=normalized_params,
+            traffic_source=normalized_params.traffic_source,
+            start_date=normalized_params.start_date,
+            end_date=normalized_params.end_date,
             refusal_reason="unsupported_metric",
             response_message=UNSUPPORTED_METRIC_MESSAGE,
         )
@@ -619,7 +622,9 @@ def build_router_decision(
     ):
         return RouterDecision(
             intent=intent,
-            normalized_params=normalized_params,
+            traffic_source=normalized_params.traffic_source,
+            start_date=normalized_params.start_date,
+            end_date=normalized_params.end_date,
             needs_clarification=True,
             clarification_reason="invalid_dates",
             response_message=INVALID_DATES_MESSAGE,
@@ -630,9 +635,7 @@ def build_router_decision(
     ):
         return RouterDecision(
             intent=intent,
-            normalized_params=RouterNormalizedParams(
-                traffic_source=normalized_params.traffic_source
-            ),
+            traffic_source=normalized_params.traffic_source,
             needs_clarification=True,
             clarification_reason="invalid_dates",
             response_message=INVALID_DATES_MESSAGE,
@@ -641,7 +644,9 @@ def build_router_decision(
     if intent == "out_of_scope":
         return RouterDecision(
             intent="out_of_scope",
-            normalized_params=normalized_params,
+            traffic_source=normalized_params.traffic_source,
+            start_date=normalized_params.start_date,
+            end_date=normalized_params.end_date,
             refusal_reason="out_of_scope",
             response_message=OUT_OF_SCOPE_MESSAGE,
         )
@@ -653,7 +658,9 @@ def build_router_decision(
     if not has_complete_date_range:
         return RouterDecision(
             intent=intent,
-            normalized_params=normalized_params,
+            traffic_source=normalized_params.traffic_source,
+            start_date=normalized_params.start_date,
+            end_date=normalized_params.end_date,
             needs_clarification=True,
             clarification_reason="missing_dates",
             response_message=MISSING_DATES_MESSAGE,
@@ -661,7 +668,9 @@ def build_router_decision(
 
     return RouterDecision(
         intent=intent,
-        normalized_params=normalized_params,
+        traffic_source=normalized_params.traffic_source,
+        start_date=normalized_params.start_date,
+        end_date=normalized_params.end_date,
     )
 
 

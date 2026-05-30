@@ -28,7 +28,7 @@ RouterRefusalReason = Literal[
 
 
 class RouterNormalizedParams(BaseModel):
-    """Normalized router parameters extracted from the user question."""
+    """Normalized router parameters. Used by deterministic_router as a value object."""
 
     traffic_source: str | None = Field(
         default=None,
@@ -49,14 +49,30 @@ class RouterNormalizedParams(BaseModel):
 
 
 class RouterDecision(BaseModel):
-    """Explicit decision contract produced by the router step."""
+    """Explicit decision contract produced by the router step.
+
+    Fields are flat so that LLMs which do not support deeply nested JSON schemas
+    (e.g. Ollama models) can populate them without wrapping in a nested object.
+    The ``normalized_params`` property provides backward-compatible access.
+    """
 
     intent: RouterIntent = Field(
         description="Intencao classificada pelo roteador para a pergunta atual."
     )
-    normalized_params: RouterNormalizedParams = Field(
-        default_factory=RouterNormalizedParams,
-        description="Parametros normalizados extraidos da pergunta.",
+    traffic_source: str | None = Field(
+        default=None,
+        description=(
+            "Canal normalizado quando a pergunta menciona exatamente um canal suportado. "
+            "Valores aceitos: Search, Organic, Facebook, Instagram. Nulo para todos os canais."
+        ),
+    )
+    start_date: date | None = Field(
+        default=None,
+        description="Data inicial normalizada (YYYY-MM-DD). Nulo se ausente na pergunta.",
+    )
+    end_date: date | None = Field(
+        default=None,
+        description="Data final normalizada (YYYY-MM-DD). Nulo se ausente na pergunta.",
     )
     needs_clarification: bool = Field(
         default=False,
@@ -79,6 +95,15 @@ class RouterDecision(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @property
+    def normalized_params(self) -> RouterNormalizedParams:
+        """Backward-compatible view of the flat date/source fields as a value object."""
+        return RouterNormalizedParams(
+            traffic_source=self.traffic_source,
+            start_date=self.start_date,
+            end_date=self.end_date,
+        )
 
     @model_validator(mode="after")
     def validate_decision_consistency(self) -> RouterDecision:
