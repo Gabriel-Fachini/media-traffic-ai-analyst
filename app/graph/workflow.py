@@ -31,26 +31,35 @@ from app.graph.prompts import (
     STRATEGY_FOLLOW_UP_SYSTEM_PROMPT,
     build_conversation_system_prompt,
 )
-from app.graph.router import (
-    EMPTY_QUESTION_MESSAGE,
-    INVALID_DATES_MESSAGE,
-    MISSING_DATES_MESSAGE,
-    OUT_OF_SCOPE_MESSAGE,
-    UNSUPPORTED_DIMENSION_MESSAGE,
-    build_router_decision,
-    question_is_contextual_diagnostic_follow_up,
-    question_is_generic_contextual_follow_up,
-    question_introduces_new_traffic_source,
-    question_is_diagnostic_follow_up,
-    question_is_metric_clarification_follow_up,
-    question_is_strategy_follow_up,
-    question_contains_temporal_signal,
-    strip_temporal_context,
-)
-from app.schemas.router import RouterDecision
 from app.graph.tools import get_analytics_tools
+from app.schemas.router import RouterDecision
 from app.utils.config import Settings, get_settings
 
+EMPTY_QUESTION_MESSAGE = (
+    "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."
+)
+INVALID_DATES_MESSAGE = (
+    "As datas informadas sao invalidas. Use datas reais em YYYY-MM-DD, DD/MM/AAAA, "
+    "DD/MM/AA ou periodos relativos suportados, por exemplo 2024-01-01 ate "
+    "2024-01-31, 01/04/2026 ate 20/04/2026, 01/04/26 ou ultimos 7 dias."
+)
+MISSING_DATES_MESSAGE = (
+    "Preciso que voce informe o periodo para eu consultar os dados. Voce pode usar "
+    "YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA ou periodos relativos como ontem, este "
+    "mes, ultimo mes e ultimos 7 dias."
+)
+OUT_OF_SCOPE_MESSAGE = (
+    "Consigo ajudar apenas com analises de trafego, pedidos e receita por canal "
+    "no dataset atual. Reformule a pergunta nesse escopo e, quando a consulta "
+    "depender de dados, informe o periodo em YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA "
+    "ou com periodos relativos suportados."
+)
+UNSUPPORTED_DIMENSION_MESSAGE = (
+    "No MVP atual eu so consigo analisar trafego, pedidos e receita por canal "
+    "(traffic_source). Reformule a pergunta nesse escopo e, quando a consulta "
+    "depender de dados, informe o periodo em YYYY-MM-DD, DD/MM/AAAA, DD/MM/AA "
+    "ou com periodos relativos suportados."
+)
 TEMPORARY_LLM_FAILURE_MESSAGE = (
     "Nao consegui concluir a analise agora por uma falha temporaria. Tente novamente em instantes."
 )
@@ -60,18 +69,6 @@ TEMPORARY_TOOL_FAILURE_MESSAGE = (
 
 # Safety guard: max agent/tool iterations per turn to prevent infinite loops.
 _MAX_AGENT_ITERATIONS = 3
-AGENT_SCOPE_CLARIFICATION_PATTERN = re.compile(
-    r"volume total.*comparar por canal|comparar por canal.*volume total",
-    re.IGNORECASE,
-)
-AGENT_MONTH_SCOPE_CLARIFICATION_PATTERN = re.compile(
-    r"este mes ate hoje.*mes calendario completo|mes calendario completo.*este mes ate hoje",
-    re.IGNORECASE,
-)
-AGENT_AMBIGUOUS_METRIC_CLARIFICATION_PATTERN = re.compile(
-    r"volume de usuarios.*performance financeira|performance financeira.*volume de usuarios",
-    re.IGNORECASE,
-)
 
 
 class AnalyticsGraphState(TypedDict, total=False):
@@ -195,23 +192,6 @@ def _get_last_human_question(messages: list[AnyMessage]) -> str:
     return ""
 
 
-def _get_last_prior_ai_answer(state: AnalyticsGraphState) -> str:
-    messages = list(state.get("messages", []))
-    turn_start_index = _resolve_turn_start_index(state)
-    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
-
-    for message in reversed(messages[:bounded_turn_start_index]):
-        if not isinstance(message, AIMessage):
-            continue
-        if message.tool_calls:
-            continue
-        answer = _content_to_text(message.content).strip()
-        if answer:
-            return answer
-
-    return ""
-
-
 def _resolve_turn_start_index(state: AnalyticsGraphState) -> int:
     messages = list(state.get("messages", []))
     explicit_question = state.get("question", "").strip()
@@ -274,41 +254,6 @@ def _collect_tools_used(messages: list[AnyMessage]) -> list[str]:
     return tools_used
 
 
-def _has_prior_successful_tool_context(state: AnalyticsGraphState) -> bool:
-    messages = list(state.get("messages", []))
-    turn_start_index = _resolve_turn_start_index(state)
-    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
-    return any(
-        _is_successful_tool_message(message)
-        for message in messages[:bounded_turn_start_index]
-    )
-
-
-def _get_previous_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
-    messages = list(state.get("messages", []))
-    turn_start_index = _resolve_turn_start_index(state)
-    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
-    previous_messages = messages[:bounded_turn_start_index]
-    if not previous_messages:
-        return []
-
-    previous_turn_start_index = 0
-    for index in range(len(previous_messages) - 1, -1, -1):
-        if isinstance(previous_messages[index], HumanMessage):
-            previous_turn_start_index = index
-            break
-
-    return previous_messages[previous_turn_start_index:]
-
-
-def _turn_has_tool_activity(messages: list[AnyMessage]) -> bool:
-    return any(
-        isinstance(message, ToolMessage)
-        or (isinstance(message, AIMessage) and message.tool_calls)
-        for message in messages
-    )
-
-
 def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
     messages = list(state.get("messages", []))
     turn_start_index = state.get("turn_start_index", _resolve_turn_start_index(state))
@@ -367,23 +312,6 @@ def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
     return "\n\n".join(context_blocks)
 
 
-def _previous_turn_opened_ambiguous_metric_clarification(
-    state: AnalyticsGraphState,
-) -> bool:
-    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
-    if previous_router_decision is None:
-        return False
-    if previous_router_decision.intent != "ambiguous_analytics":
-        return False
-
-    previous_turn_messages = _get_previous_turn_messages(state)
-    if not previous_turn_messages:
-        return False
-    if _turn_has_tool_activity(previous_turn_messages):
-        return False
-
-    return bool(_get_last_prior_ai_answer(state))
-
 def _build_follow_up_system_messages(
     state: AnalyticsGraphState,
     router_decision: RouterDecision | None,
@@ -416,170 +344,6 @@ def _build_follow_up_system_messages(
             )
         ),
     ]
-def _infer_follow_up_intent_from_previous_context(
-    *,
-    previous_router_decision: RouterDecision | None,
-    previous_ai_answer: str,
-) -> Literal["strategy_follow_up", "diagnostic_follow_up"] | None:
-    if previous_router_decision is not None:
-        if previous_router_decision.intent == "strategy_follow_up":
-            return "strategy_follow_up"
-        if previous_router_decision.intent == "diagnostic_follow_up":
-            return "diagnostic_follow_up"
-
-    normalized_previous_answer = _normalize_loose_text(previous_ai_answer)
-    if not normalized_previous_answer:
-        return None
-
-    diagnostic_cues = (
-        "diagnostic",
-        "hipotese",
-        "explica",
-        "explicar",
-        "leitura mais diagnostica",
-        "melhor ou pior",
-        "abaixo de",
-        "acima de",
-        "comparar com os outros",
-    )
-    if any(cue in normalized_previous_answer for cue in diagnostic_cues):
-        return "diagnostic_follow_up"
-
-    strategy_cues = (
-        "acoes",
-        "acao",
-        "plano",
-        "priorizar",
-        "recomend",
-        "sugest",
-        "proximo passo",
-        "melhorar",
-        "fortalecer",
-    )
-    if any(cue in normalized_previous_answer for cue in strategy_cues):
-        return "strategy_follow_up"
-
-    return None
-
-
-def _question_has_soft_strategy_signal(question: str) -> bool:
-    normalized_question = _normalize_loose_text(question)
-    if not normalized_question:
-        return False
-    if any(
-        token in normalized_question
-        for token in ("empresa", "empresas", "company", "companies")
-    ):
-        return False
-    return any(
-        cue in normalized_question
-        for cue in (
-            "acoes",
-            "acao",
-            "priorizar",
-            "prioridade",
-            "plano",
-            "recomend",
-            "sugest",
-            "proximo passo",
-            "proximos passos",
-            "melhorar",
-            "fortalecer",
-        )
-    )
-
-
-def _question_has_soft_diagnostic_signal(question: str) -> bool:
-    normalized_question = _normalize_loose_text(question)
-    if not normalized_question:
-        return False
-    if any(
-        token in normalized_question
-        for token in ("empresa", "empresas", "company", "companies")
-    ):
-        return False
-    return any(
-        cue in normalized_question
-        for cue in (
-            "por que",
-            "porque",
-            "o que explica",
-            "como explicar",
-            "qual a explicacao",
-            "explica",
-            "explicar",
-            "explicacao",
-            "causa",
-            "causas",
-            "motivo",
-            "motivos",
-            "hipotese",
-            "hipoteses",
-            "diagnostico",
-            "diagnostica",
-        )
-    )
-
-
-def _resolve_follow_up_intent(
-    question: str,
-    *,
-    has_prior_context: bool,
-    previous_router_decision: RouterDecision | None,
-    previous_ai_answer: str,
-) -> Literal["strategy_follow_up", "diagnostic_follow_up"] | None:
-    if not has_prior_context:
-        return None
-
-    if question_is_strategy_follow_up(question):
-        return "strategy_follow_up"
-
-    if question_is_diagnostic_follow_up(question):
-        return "diagnostic_follow_up"
-
-    if question_is_contextual_diagnostic_follow_up(question):
-        return "diagnostic_follow_up"
-
-    if question_is_generic_contextual_follow_up(question):
-        inferred_intent = _infer_follow_up_intent_from_previous_context(
-            previous_router_decision=previous_router_decision,
-            previous_ai_answer=previous_ai_answer,
-        )
-        if inferred_intent is not None:
-            return inferred_intent
-        return "strategy_follow_up"
-
-    # Once there is valid prior analytics context in the same thread, allow the
-    # agent to handle short strategic/diagnostic follow-ups even when the new
-    # user turn no longer repeats explicit analytics anchors.
-    normalized_question = _normalize_loose_text(question)
-    question_tokens = normalized_question.split()
-    if len(question_tokens) <= 12:
-        if _question_has_soft_diagnostic_signal(normalized_question):
-            return "diagnostic_follow_up"
-        if _question_has_soft_strategy_signal(normalized_question):
-            return "strategy_follow_up"
-
-    return None
-
-
-def _question_changes_follow_up_traffic_scope(
-    question: str,
-    *,
-    previous_router_decision: RouterDecision | None,
-    follow_up_intent: Literal["strategy_follow_up", "diagnostic_follow_up"] | None,
-) -> bool:
-    if previous_router_decision is None:
-        return False
-
-    previous_traffic_source = previous_router_decision.normalized_params.traffic_source
-    if follow_up_intent is not None and previous_traffic_source is None:
-        return False
-
-    return question_introduces_new_traffic_source(
-        question,
-        previous_traffic_source=previous_traffic_source,
-    )
 
 
 def _build_router_guidance_message(
@@ -629,73 +393,6 @@ def _build_router_guidance_message(
     return "\n".join(guidance_lines)
 
 
-def _merge_follow_up_with_previous_question(
-    state: AnalyticsGraphState,
-    question: str,
-) -> str | None:
-    previous_question = _get_last_human_question(list(state.get("messages", [])))
-    if not previous_question:
-        return None
-
-    return f"{previous_question.rstrip()} {question.strip()}".strip()
-
-
-def _build_agent_clarification_follow_up_question(
-    state: AnalyticsGraphState,
-    question: str,
-) -> str | None:
-    previous_ai_answer = _get_last_prior_ai_answer(state)
-    if not previous_ai_answer:
-        return None
-
-    normalized_previous_ai_answer = _normalize_loose_text(previous_ai_answer)
-    normalized_question = _normalize_loose_text(question)
-    if not normalized_question:
-        return None
-
-    if AGENT_SCOPE_CLARIFICATION_PATTERN.search(normalized_previous_ai_answer):
-        if normalized_question in {
-            "total",
-            "volume total",
-            "comparar",
-            "comparacao",
-            "comparar por canal",
-            "por canal",
-            "canal",
-        }:
-            return _merge_follow_up_with_previous_question(state, question)
-
-    if AGENT_MONTH_SCOPE_CLARIFICATION_PATTERN.search(normalized_previous_ai_answer):
-        if normalized_question in {
-            "ate hoje",
-            "este mes ate hoje",
-            "mes calendario completo",
-            "mes completo",
-            "quero o mes calendario completo",
-        }:
-            return _merge_follow_up_with_previous_question(state, question)
-
-    if normalized_question in {
-        "volume",
-        "volume de usuarios",
-        "usuarios",
-        "trafego",
-        "performance",
-        "performance financeira",
-        "financeira",
-        "receita",
-        "pedidos",
-        "receita e pedidos",
-    } and (
-        AGENT_AMBIGUOUS_METRIC_CLARIFICATION_PATTERN.search(
-            normalized_previous_ai_answer
-        )
-        or _previous_turn_opened_ambiguous_metric_clarification(state)
-    ):
-        return _merge_follow_up_with_previous_question(state, question)
-    return None
-
-
 def _build_temporary_failure_ai_message() -> AIMessage:
     return AIMessage(content=TEMPORARY_LLM_FAILURE_MESSAGE)
 
@@ -727,109 +424,12 @@ def _resolve_router_turn(
     settings: Settings | None = None,
     router_llm: Any | None = None,
 ) -> tuple[str, RouterDecision]:
-    router_decision = classify_question(
+    return question, classify_question(
         question,
         thread_context=build_router_thread_context(list(state.get("messages", []))),
         settings=settings,
         _router_runnable=router_llm,
     )
-    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
-    previous_ai_answer = _get_last_prior_ai_answer(state)
-    follow_up_intent = _resolve_follow_up_intent(
-        question,
-        has_prior_context=_has_prior_successful_tool_context(state),
-        previous_router_decision=previous_router_decision,
-        previous_ai_answer=previous_ai_answer,
-    )
-    follow_up_changes_traffic_source = _question_changes_follow_up_traffic_scope(
-        question,
-        previous_router_decision=previous_router_decision,
-        follow_up_intent=follow_up_intent,
-    )
-    if (
-        (
-            router_decision.refusal_reason in {"out_of_scope", "unsupported_dimension"}
-            or (
-                router_decision.needs_clarification
-                and router_decision.clarification_reason == "missing_dates"
-            )
-        )
-        and not follow_up_changes_traffic_source
-        and follow_up_intent is not None
-    ):
-        return (
-            question,
-            RouterDecision(
-                intent=follow_up_intent,
-                normalized_params=router_decision.normalized_params,
-            ),
-        )
-
-    merged_agent_clarification_question = _build_agent_clarification_follow_up_question(
-        state,
-        question,
-    )
-    if (
-        merged_agent_clarification_question is not None
-        and not follow_up_changes_traffic_source
-    ):
-        merged_router_decision = build_router_decision(merged_agent_clarification_question)
-        if (
-            merged_router_decision.intent != "out_of_scope"
-            or merged_router_decision.needs_clarification
-        ):
-            return merged_agent_clarification_question, merged_router_decision
-
-    should_merge_temporal_follow_up = (
-        previous_router_decision is not None
-        and previous_router_decision.needs_clarification
-        and previous_router_decision.clarification_reason in {"missing_dates", "invalid_dates"}
-        and question_contains_temporal_signal(question)
-        and not follow_up_changes_traffic_source
-        and (
-            (
-                previous_router_decision.clarification_reason == "invalid_dates"
-                and previous_router_decision.intent == "ambiguous_analytics"
-            )
-            or
-            router_decision.intent in {"out_of_scope", "ambiguous_analytics"}
-            or router_decision.intent == previous_router_decision.intent
-        )
-    )
-    should_merge_metric_follow_up = (
-        previous_router_decision is not None
-        and previous_router_decision.needs_clarification
-        and previous_router_decision.clarification_reason == "ambiguous_metric"
-        and question_is_metric_clarification_follow_up(question)
-        and not follow_up_changes_traffic_source
-    )
-
-    if (
-        not should_merge_temporal_follow_up
-        and not should_merge_metric_follow_up
-    ):
-        return question, router_decision
-
-    previous_question = _get_last_human_question(list(state.get("messages", [])))
-    if not previous_question:
-        return question, router_decision
-
-    previous_question_for_merge = previous_question
-    if previous_router_decision is not None:
-        if previous_router_decision.clarification_reason == "invalid_dates":
-            previous_question_for_merge = strip_temporal_context(previous_question)
-
-    merged_question = (
-        f"{previous_question_for_merge.rstrip()} {question.strip()}".strip()
-    )
-    merged_router_decision = build_router_decision(merged_question)
-    if (
-        merged_router_decision.intent == "out_of_scope"
-        and not merged_router_decision.needs_clarification
-    ):
-        return question, router_decision
-
-    return merged_question, merged_router_decision
 
 
 def _count_agent_iterations_in_turn(state: AnalyticsGraphState) -> int:

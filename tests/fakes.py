@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.graph.router import build_router_decision
+from app.graph.date_normalizer import normalize_text as _normalize_text
+from tests.deterministic_router import build_router_decision
 from app.graph.workflow import build_analytics_graph
-from app.schemas.router import RouterDecision
+from app.schemas.router import RouterDecision, RouterNormalizedParams
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 
 
@@ -156,6 +158,24 @@ class FakeAgentLLM:
                 return canonical
         return None
 
+    def _get_router_guidance(self, messages: list[Any]) -> dict[str, str | None]:
+        """Extract intent and traffic_source from the router guidance SystemMessage."""
+        for msg in messages:
+            if not isinstance(msg, SystemMessage):
+                continue
+            content = _extract_text(msg.content)
+            if "Contexto estruturado do router" not in content:
+                continue
+            result: dict[str, str | None] = {}
+            for line in content.split("\n"):
+                if "- intent: " in line:
+                    result["intent"] = line.split("- intent: ")[-1].strip()
+                elif "- traffic_source: " in line:
+                    src = line.split("- traffic_source: ")[-1].strip()
+                    result["traffic_source"] = None if "agregado" in src else src
+            return result
+        return {}
+
     def _has_follow_up_context(self, messages: list[Any]) -> bool:
         return any(
             isinstance(message, SystemMessage)
@@ -289,22 +309,95 @@ class FakeSynthesisLLM:
         return AIMessage(content=f"SYNTH::{tool_name}::{question}")
 
 
+_DIAGNOSTIC_WORDS: frozenset[str] = frozenset(
+    {"explica", "explicar", "causa", "hipotese", "diagnostico", "motivo"}
+)
+_STRATEGY_WORDS: frozenset[str] = frozenset(
+    {"acao", "acoes", "priorizar", "recomend", "sugest", "plano", "melhorar", "fortalecer"}
+)
+_GENERIC_FOLLOW_UP_WORDS: frozenset[str] = frozenset(
+    {"ajude", "ajudar", "continue", "continuar", "segue", "seguir", "siga"}
+)
+
+
 @dataclass
 class FakeRouterRunnable:
-    """Deterministic router runnable for integration tests.
+    """Simulates the chain returned by base_llm.with_structured_output(RouterDecision).
 
-    Simulates the chain returned by base_llm.with_structured_output(RouterDecision).
-    Delegates to the deterministic build_router_decision so existing tests maintain
-    their expected RouterDecision outcomes without hitting a real LLM.
+    Replicates the thread-aware behavior of the real LLM router:
+    1. If the base decision is complete (no clarification, no refusal), return it.
+    2. If there is a prior successful ToolMessage and the question has direct
+       diagnostic/strategy language, return the matching follow-up intent.
+    3. If there is a prior ToolMessage and the question has generic "help me" language,
+       infer the follow-up type from the most recent AI message.
+    4. If the base decision has no specific traffic_source and there is a prior
+       HumanMessage, try combining questions (simulates LLM date/metric inference).
+    5. Fall back to the raw base decision.
     """
 
     def invoke(self, messages: list[Any]) -> RouterDecision:
         question = ""
+        prev_human_question = ""
+        found_current = False
         for msg in reversed(messages):
             if isinstance(msg, HumanMessage):
-                question = _extract_text(msg.content)
-                break
-        return build_router_decision(question)
+                content = _extract_text(msg.content)
+                if not found_current:
+                    question = content
+                    found_current = True
+                elif content and content != question and not prev_human_question:
+                    prev_human_question = content
+
+        base_decision = build_router_decision(question)
+
+        # Complete decision — return without further inspection.
+        if not base_decision.needs_clarification and base_decision.refusal_reason is None:
+            return base_decision
+
+        # Prior tool result → follow-up intent detection.
+        if any(isinstance(m, ToolMessage) for m in messages):
+            normalized_q = _normalize_text(question)
+            if any(w in normalized_q for w in _DIAGNOSTIC_WORDS) or bool(
+                re.search(r"por que|porque", normalized_q)
+            ):
+                return RouterDecision(
+                    intent="diagnostic_follow_up",
+                    normalized_params=RouterNormalizedParams(),
+                )
+            if any(w in normalized_q for w in _STRATEGY_WORDS):
+                return RouterDecision(
+                    intent="strategy_follow_up",
+                    normalized_params=RouterNormalizedParams(),
+                )
+            # Generic "help me" phrase — infer intent from most recent AI text.
+            if any(w in normalized_q for w in _GENERIC_FOLLOW_UP_WORDS):
+                for msg in reversed(messages):
+                    if isinstance(msg, AIMessage) and not msg.tool_calls:
+                        prior_text = _normalize_text(_extract_text(msg.content))
+                        if any(w in prior_text for w in _DIAGNOSTIC_WORDS) or bool(
+                            re.search(r"por que|porque|explica", prior_text)
+                        ):
+                            return RouterDecision(
+                                intent="diagnostic_follow_up",
+                                normalized_params=RouterNormalizedParams(),
+                            )
+                        return RouterDecision(
+                            intent="strategy_follow_up",
+                            normalized_params=RouterNormalizedParams(),
+                        )
+
+        # Merge with previous HumanMessage only when base has no specific traffic_source.
+        # A channel-specific query (traffic_source set) is treated as a fresh question.
+        if prev_human_question and base_decision.normalized_params.traffic_source is None:
+            combined = f"{prev_human_question.rstrip()} {question.strip()}".strip()
+            combined_decision = build_router_decision(combined)
+            if (
+                not combined_decision.needs_clarification
+                and combined_decision.refusal_reason is None
+            ):
+                return combined_decision
+
+        return base_decision
 
 
 @dataclass

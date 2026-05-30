@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.graph.router import INVALID_DATES_MESSAGE, build_router_decision
+from tests.deterministic_router import INVALID_DATES_MESSAGE, build_router_decision
 
 
 pytestmark = pytest.mark.unit

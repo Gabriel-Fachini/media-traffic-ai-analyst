@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from app.graph.router import build_router_decision
+from tests.deterministic_router import build_router_decision
 from app.schemas.router import RouterDecision
 
 CASES_PATH = Path(__file__).parent / "router_cases.jsonl"

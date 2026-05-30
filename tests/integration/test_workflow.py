@@ -579,7 +579,7 @@ def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
         == "Claro — para eu trazer o volume de trafego deste mes, preciso de uma coisa antes: voce quer o volume total ou comparar por canal (ex.: Search, Organic, Facebook)?"
     )
     assert "traffic_volume_analyzer" in _require_list(second_state, "tools_used")
-    assert _require_str(second_state, "resolved_question") == "volume de trafego este mes total"
+    assert _require_str(second_state, "resolved_question") == "total"
     assert router_decision.intent == "traffic_volume"
     assert router_decision.refusal_reason is None
 
@@ -604,10 +604,7 @@ def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clari
         first_state, "final_answer"
     )
     assert "traffic_volume_analyzer" in _require_list(second_state, "tools_used")
-    assert (
-        _require_str(second_state, "resolved_question")
-        == "Como o Search performou ontem? volume de usuarios"
-    )
+    assert _require_str(second_state, "resolved_question") == "volume de usuarios"
     assert router_decision.intent == "traffic_volume"
     assert router_decision.normalized_params.traffic_source == "Search"
     assert router_decision.normalized_params.start_date is not None
@@ -642,9 +639,7 @@ def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> N
         "Voce quer olhar usuarios ou receita/pedidos?"
     )
     assert "channel_performance_analyzer" in _require_list(second_state, "tools_used")
-    assert _require_str(second_state, "resolved_question") == (
-        "Como o Search performou ontem? receita"
-    )
+    assert _require_str(second_state, "resolved_question") == "receita"
     assert router_decision.intent == "channel_performance"
     assert router_decision.normalized_params.traffic_source == "Search"
     assert router_decision.normalized_params.start_date is not None

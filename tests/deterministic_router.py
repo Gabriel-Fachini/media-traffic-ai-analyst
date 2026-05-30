@@ -1,3 +1,11 @@
+"""Deterministic router — kept as test utility after LLM router replaced it in production.
+
+Used by:
+- tests/fakes.py (FakeRouterRunnable fallback)
+- tests/unit/test_router.py
+- tests/eval/test_router_eval.py
+- tests/readiness/test_readiness_suite.py
+"""
 from __future__ import annotations
 
 from datetime import date
@@ -114,158 +122,6 @@ SUPPORTED_COMPARISON_TOKENS = frozenset(
         "versus",
         "vs",
     }
-)
-STRATEGY_FOLLOW_UP_TOKENS = frozenset(
-    {
-        "acao",
-        "acoes",
-        "analise",
-        "analises",
-        "aumentar",
-        "crescer",
-        "dependencia",
-        "dependente",
-        "diminuir",
-        "detalhar",
-        "detalhe",
-        "diversificar",
-        "expandir",
-        "expanda",
-        "estrategia",
-        "estrategias",
-        "fortalecer",
-        "melhorar",
-        "melhoria",
-        "monte",
-        "otimizacao",
-        "otimizar",
-        "passo",
-        "passos",
-        "plano",
-        "priorizar",
-        "proximo",
-        "proximos",
-        "reduzir",
-        "recomendacao",
-        "recomendacoes",
-        "recomenda",
-        "recomendar",
-        "retorne",
-        "retornar",
-        "sugestao",
-        "sugestoes",
-    }
-)
-FOLLOW_UP_ACTION_TOKENS = frozenset(
-    {
-        "aprofunde",
-        "aprofundar",
-        "continue",
-        "continuar",
-        "descreva",
-        "desenvolva",
-        "detalhar",
-        "detalhe",
-        "expanda",
-        "expandir",
-        "monte",
-        "retorne",
-        "retornar",
-    }
-)
-FOLLOW_UP_STRATEGY_OBJECT_TOKENS = frozenset(
-    {
-        "acao",
-        "acoes",
-        "analise",
-        "analises",
-        "estrategia",
-        "estrategias",
-        "plano",
-        "prioridade",
-        "prioridades",
-        "recomendacao",
-        "recomendacoes",
-        "sugestao",
-        "sugestoes",
-    }
-)
-GENERIC_CONTEXTUAL_FOLLOW_UP_ACTION_TOKENS = frozenset(
-    {
-        "ajuda",
-        "ajudar",
-        "ajude",
-        "continue",
-        "continuar",
-        "faca",
-        "fazer",
-        "monte",
-        "mostra",
-        "mostrar",
-        "mostre",
-        "responda",
-        "responder",
-        "retorne",
-        "retornar",
-        "segue",
-        "seguir",
-        "siga",
-        "traga",
-    }
-)
-GENERIC_CONTEXTUAL_FOLLOW_UP_REFERENCE_TOKENS = frozenset(
-    {
-        "ai",
-        "entao",
-        "essa",
-        "esse",
-        "isso",
-        "leitura",
-    }
-)
-CONTEXTUAL_DIAGNOSTIC_SIGNAL_TOKENS = frozenset(
-    {
-        "abaixo",
-        "acima",
-        "comparacao",
-        "comparar",
-        "comparativo",
-        "desempenho",
-        "melhor",
-        "melhores",
-        "outro",
-        "outra",
-        "outros",
-        "outras",
-        "pior",
-        "piores",
-        "performando",
-        "performar",
-        "performou",
-    }
-)
-DIAGNOSTIC_FOLLOW_UP_TOKENS = frozenset(
-    {
-        "causa",
-        "causas",
-        "diagnostica",
-        "diagnostico",
-        "entender",
-        "explica",
-        "explicacao",
-        "explicar",
-        "fator",
-        "fatores",
-        "hipotese",
-        "hipoteses",
-        "motivo",
-        "motivos",
-        "razao",
-        "razoes",
-    }
-)
-DIAGNOSTIC_FOLLOW_UP_PATTERN = re.compile(
-    r"\b(?:por que|porque|o que explica|como explicar|qual a explicacao)\b"
 )
 SUPPORTED_ANALYTICS_DIMENSION_TOKENS = frozenset(
     {
@@ -594,123 +450,6 @@ def _question_is_aggregate_user_volume_query(question: str) -> bool:
     return has_user_metric and has_temporal_signal and not has_performance_metric
 
 
-def _question_contains_metric_follow_up_signal(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    return bool(
-        question_tokens
-        & (
-            SUPPORTED_USER_METRIC_TOKENS
-            | SUPPORTED_VOLUME_SIGNAL_TOKENS
-            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
-        )
-    )
-
-
-def question_is_metric_clarification_follow_up(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    if not question_tokens:
-        return False
-    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
-        return False
-    return _question_contains_metric_follow_up_signal(question)
-
-
-def question_is_strategy_follow_up(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    if not question_tokens:
-        return False
-
-    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
-        return False
-
-    has_strategy_signal = bool(question_tokens & STRATEGY_FOLLOW_UP_TOKENS)
-    has_analytics_anchor = bool(
-        question_tokens
-        & (
-            SUPPORTED_CHANNEL_TOKENS
-            | SUPPORTED_SOURCE_TOKENS
-            | SUPPORTED_VOLUME_SIGNAL_TOKENS
-            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
-        )
-    )
-    has_contextual_strategy_request = bool(
-        question_tokens & FOLLOW_UP_ACTION_TOKENS
-    ) and bool(question_tokens & FOLLOW_UP_STRATEGY_OBJECT_TOKENS)
-    return (has_strategy_signal and has_analytics_anchor) or has_contextual_strategy_request
-
-
-def question_is_generic_contextual_follow_up(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    if not question_tokens:
-        return False
-
-    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
-        return False
-
-    has_action = bool(question_tokens & GENERIC_CONTEXTUAL_FOLLOW_UP_ACTION_TOKENS)
-    has_reference = bool(question_tokens & GENERIC_CONTEXTUAL_FOLLOW_UP_REFERENCE_TOKENS)
-    return has_action and (has_reference or len(question_tokens) <= 3)
-
-
-def question_is_contextual_diagnostic_follow_up(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    if not question_tokens:
-        return False
-
-    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
-        return False
-
-    has_signal = bool(question_tokens & CONTEXTUAL_DIAGNOSTIC_SIGNAL_TOKENS)
-    has_anchor = bool(
-        question_tokens
-        & (
-            SUPPORTED_CHANNEL_TOKENS
-            | SUPPORTED_SOURCE_TOKENS
-            | {"outro", "outra", "outros", "outras"}
-        )
-    )
-    return has_signal and has_anchor
-
-
-def question_is_diagnostic_follow_up(question: str) -> bool:
-    question_tokens = _extract_question_tokens(question)
-    if not question_tokens:
-        return False
-
-    if question_tokens & UNSUPPORTED_METRIC_TOKENS:
-        return False
-
-    normalized_question = _normalize_text(question)
-    has_diagnostic_signal = bool(
-        question_tokens & DIAGNOSTIC_FOLLOW_UP_TOKENS
-    ) or bool(DIAGNOSTIC_FOLLOW_UP_PATTERN.search(normalized_question))
-    has_analytics_anchor = bool(
-        question_tokens
-        & (
-            SUPPORTED_CHANNEL_TOKENS
-            | SUPPORTED_SOURCE_TOKENS
-            | SUPPORTED_VOLUME_SIGNAL_TOKENS
-            | SUPPORTED_PERFORMANCE_METRIC_TOKENS
-        )
-    )
-    return has_diagnostic_signal and has_analytics_anchor
-
-
-def question_introduces_new_traffic_source(
-    question: str,
-    *,
-    previous_traffic_source: str | None = None,
-) -> bool:
-    question_sources = _extract_traffic_sources(question)
-    if not question_sources:
-        return False
-
-    if previous_traffic_source is None:
-        return True
-
-    return set(question_sources) != {previous_traffic_source}
-
-
 def _question_is_supported_channel_comparison(question: str) -> bool:
     question_tokens = _extract_question_tokens(question)
     if not question_tokens:
@@ -934,12 +673,6 @@ __all__ = [
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "UNSUPPORTED_METRIC_MESSAGE",
     "build_router_decision",
-    "question_is_contextual_diagnostic_follow_up",
-    "question_is_diagnostic_follow_up",
-    "question_is_generic_contextual_follow_up",
-    "question_introduces_new_traffic_source",
-    "question_is_metric_clarification_follow_up",
-    "question_is_strategy_follow_up",
     "question_contains_temporal_signal",
     "strip_temporal_context",
 ]
