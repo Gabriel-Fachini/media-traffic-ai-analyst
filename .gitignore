@@ -9,3 +9,4 @@ app/credentials/*.json
 credentials/*.json
 .ruff_cache/
 .pytest_cache/
+.langgraph_api/
