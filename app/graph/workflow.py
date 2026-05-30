@@ -25,10 +25,14 @@ from app.graph.llm import (
     build_tool_enabled_llm,
     is_llm_timeout_error,
 )
+from app.graph.date_normalizer import (
+    _extract_relative_date_range,
+    question_contains_temporal_signal,
+)
 from app.graph.llm_router import build_router_thread_context, classify_question
 from app.graph.prompts import build_conversation_system_prompt
 from app.graph.tools import get_analytics_tools
-from app.schemas.router import RouterDecision, RouterNormalizedParams
+from app.schemas.router import RouterDecision
 from app.utils.config import Settings, get_settings
 
 EMPTY_QUESTION_MESSAGE = (
@@ -408,18 +412,60 @@ def _router_decision_short_circuits(router_decision: RouterDecision) -> bool:
     )
 
 
+def _apply_date_normalizer(question: str, decision: RouterDecision) -> RouterDecision:
+    """Post-process the LLM router decision with deterministic date resolution.
+
+    The LLM is told not to infer dates, so it leaves start_date/end_date null for
+    relative expressions like "ultimo mes". This function fills them in using the
+    deterministic date normalizer and clears missing_dates if resolution succeeds.
+    """
+    if not question_contains_temporal_signal(question):
+        return decision
+
+    date_range, _ = _extract_relative_date_range(question)
+    if date_range is None:
+        # Temporal signal detected but normalizer couldn't resolve (e.g. explicit
+        # dates the LLM already handled) — only override if both dates still null.
+        if decision.start_date is not None or decision.end_date is not None:
+            return decision
+        return decision
+
+    resolved_start, resolved_end = date_range
+    needs_clarification = decision.needs_clarification
+    clarification_reason = decision.clarification_reason
+    response_message = decision.response_message
+
+    # Clear missing_dates if the normalizer resolved the period.
+    if needs_clarification and clarification_reason == "missing_dates":
+        needs_clarification = False
+        clarification_reason = None
+        response_message = None
+
+    return RouterDecision(
+        intent=decision.intent,
+        traffic_source=decision.traffic_source,
+        start_date=decision.start_date if decision.start_date is not None else resolved_start,
+        end_date=decision.end_date if decision.end_date is not None else resolved_end,
+        needs_clarification=needs_clarification,
+        clarification_reason=clarification_reason,
+        refusal_reason=decision.refusal_reason,
+        response_message=response_message,
+    )
+
+
 def _resolve_router_turn(
     state: AnalyticsGraphState,
     question: str,
     settings: Settings | None = None,
     router_llm: Any | None = None,
 ) -> tuple[str, RouterDecision]:
-    return question, classify_question(
+    decision = classify_question(
         question,
         thread_context=build_router_thread_context(list(state.get("messages", []))),
         settings=settings,
         _router_runnable=router_llm,
     )
+    return question, _apply_date_normalizer(question, decision)
 
 
 def _count_agent_iterations_in_turn(state: AnalyticsGraphState) -> int:
@@ -460,7 +506,6 @@ def build_analytics_graph(
                 intent="out_of_scope",
                 refusal_reason="empty_question",
                 response_message=EMPTY_QUESTION_MESSAGE,
-                normalized_params=RouterNormalizedParams(),
             )
             return Command(
                 update={
