@@ -1,40 +1,25 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date
 import re
-import unicodedata
 from typing import Literal
 
+from app.graph.date_normalizer import (
+    normalize_text as _normalize_text,
+    _extract_valid_and_invalid_explicit_dates,
+    _extract_relative_date_range,
+    _resolve_reference_date,
+    question_contains_temporal_signal,
+    strip_temporal_context,
+)
 from app.schemas.router import RouterDecision, RouterNormalizedParams
 
-EXPLICIT_DATE_TOKEN_PATTERN = re.compile(
-    r"\b(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{2}(?:\d{2})?)\b"
-)
 DIMENSION_REQUEST_PATTERN = re.compile(
     r"\b(?:por|by|per)\s+([a-z0-9_]+)(?:\s+([a-z0-9_]+))?\b"
 )
 SOURCE_FILTER_PATTERN = re.compile(r"\b(?:de|do|da|from)\s+([a-z0-9_]+)\b")
 QUESTION_TOKEN_PATTERN = re.compile(r"[a-z0-9_]+")
-YESTERDAY_PATTERN = re.compile(r"\bontem\b")
-THIS_MONTH_PATTERN = re.compile(r"\beste\s+mes\b")
-LAST_MONTH_PATTERN = re.compile(r"\bultimo\s+mes\b")
-LAST_N_DAYS_PATTERN = re.compile(r"\bultimos?\s+(\d+)\s+dias?\b")
-CALENDAR_MONTH_COMPLETE_PATTERN = re.compile(
-    r"\bmes\s+calendario\s+completo\b|\bmes\s+completo\b"
-)
-TEMPORAL_CONTEXT_PATTERN = re.compile(
-    r"\b(?:entre|from)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\s+(?:e|a|ate|to)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\b"
-    r"|\b(?:entre|from)\s+\d{4}-\d{2}-\d{2}\s+(?:e|a|ate|to)\s+\d{4}-\d{2}-\d{2}\b"
-    r"|\b(?:em|in|on|de|do|da|from)\s+\d{2}/\d{2}/\d{2}(?:\d{2})?\b"
-    r"|\b(?:em|in|on|de|do|da|from)\s+\d{4}-\d{2}-\d{2}\b"
-    r"|\b(?:no|na|nos|nas|em|in)\s+ultimo\s+mes\b"
-    r"|\b(?:no|na|nos|nas|em|in)\s+este\s+mes\b"
-    r"|\bmes\s+calendario\s+completo\b"
-    r"|\bmes\s+completo\b"
-    r"|\b(?:nos|nas|em|in)\s+ultimos?\s+\d+\s+dias?\b"
-    r"|\bontem\b",
-    re.IGNORECASE,
-)
+
 TEMPORAL_SOURCE_FILTER_IGNORED_TOKENS = frozenset(
     {
         "ontem",
@@ -453,24 +438,6 @@ def _build_unsupported_traffic_source_message(source_token: str) -> str:
     )
 
 
-def _normalize_text(value: str) -> str:
-    normalized = unicodedata.normalize("NFKD", value)
-    return "".join(
-        character for character in normalized if not unicodedata.combining(character)
-    ).lower()
-
-
-def _resolve_reference_date(reference_date: date | None) -> date:
-    return reference_date or date.today()
-
-
-def _extract_explicit_date_tokens(question: str) -> list[str]:
-    return [
-        match.group(0)
-        for match in EXPLICIT_DATE_TOKEN_PATTERN.finditer(question)
-    ]
-
-
 def _extract_requested_dimensions(question: str) -> list[str]:
     normalized_question = _normalize_text(question)
     requested_dimensions: list[str] = []
@@ -501,108 +468,6 @@ def _extract_requested_dimensions(question: str) -> list[str]:
             requested_dimensions.append(first_token)
 
     return requested_dimensions
-
-
-def _parse_explicit_date_token(date_token: str) -> date:
-    if "-" in date_token:
-        return date.fromisoformat(date_token)
-    for date_format in ("%d/%m/%Y", "%d/%m/%y"):
-        try:
-            return datetime.strptime(date_token, date_format).date()
-        except ValueError:
-            continue
-    raise ValueError("Data invalida.")
-
-
-def _extract_valid_and_invalid_explicit_dates(
-    question: str,
-) -> tuple[list[date], list[str]]:
-    valid_dates: list[date] = []
-    invalid_dates: list[str] = []
-
-    for date_token in _extract_explicit_date_tokens(question):
-        try:
-            valid_dates.append(_parse_explicit_date_token(date_token))
-        except ValueError:
-            invalid_dates.append(date_token)
-
-    return valid_dates, invalid_dates
-
-
-def _match_yesterday(reference_date: date) -> tuple[date, date]:
-    yesterday = reference_date - timedelta(days=1)
-    return yesterday, yesterday
-
-
-def _match_this_month(reference_date: date) -> tuple[date, date]:
-    return reference_date.replace(day=1), reference_date
-
-
-def _match_last_month(reference_date: date) -> tuple[date, date]:
-    current_month_start = reference_date.replace(day=1)
-    last_month_end = current_month_start - timedelta(days=1)
-    return last_month_end.replace(day=1), last_month_end
-
-
-def _match_calendar_month_complete(reference_date: date) -> tuple[date, date]:
-    current_month_start = reference_date.replace(day=1)
-    if reference_date.month == 12:
-        next_month_start = date(reference_date.year + 1, 1, 1)
-    else:
-        next_month_start = date(reference_date.year, reference_date.month + 1, 1)
-    return current_month_start, next_month_start - timedelta(days=1)
-
-
-def _extract_relative_date_range(
-    question: str,
-    *,
-    reference_date: date | None = None,
-) -> tuple[tuple[date, date] | None, list[str]]:
-    normalized_question = _normalize_text(question)
-    resolved_reference_date = _resolve_reference_date(reference_date)
-    relative_matches: list[tuple[int, tuple[date, date]]] = []
-    invalid_tokens: list[str] = []
-
-    for match in YESTERDAY_PATTERN.finditer(normalized_question):
-        relative_matches.append(
-            (match.start(), _match_yesterday(resolved_reference_date))
-        )
-
-    for match in THIS_MONTH_PATTERN.finditer(normalized_question):
-        relative_matches.append(
-            (match.start(), _match_this_month(resolved_reference_date))
-        )
-
-    for match in LAST_MONTH_PATTERN.finditer(normalized_question):
-        relative_matches.append(
-            (match.start(), _match_last_month(resolved_reference_date))
-        )
-
-    for match in CALENDAR_MONTH_COMPLETE_PATTERN.finditer(normalized_question):
-        relative_matches.append(
-            (match.start(), _match_calendar_month_complete(resolved_reference_date))
-        )
-
-    for match in LAST_N_DAYS_PATTERN.finditer(normalized_question):
-        day_count = int(match.group(1))
-        if day_count <= 0:
-            invalid_tokens.append(match.group(0))
-            continue
-        relative_matches.append(
-            (
-                match.start(),
-                (
-                    resolved_reference_date - timedelta(days=day_count - 1),
-                    resolved_reference_date,
-                ),
-            )
-        )
-
-    if not relative_matches:
-        return None, invalid_tokens
-
-    relative_matches.sort(key=lambda item: item[0])
-    return relative_matches[-1][1], invalid_tokens
 
 
 def _extract_question_tokens(question: str) -> set[str]:
@@ -926,30 +791,6 @@ def _build_normalized_params(
         start_date=start_date,
         end_date=end_date,
     )
-
-
-def question_contains_temporal_signal(question: str) -> bool:
-    if EXPLICIT_DATE_TOKEN_PATTERN.search(question):
-        return True
-
-    normalized_question = _normalize_text(question)
-    return any(
-        pattern.search(normalized_question)
-        for pattern in (
-            YESTERDAY_PATTERN,
-            THIS_MONTH_PATTERN,
-            LAST_MONTH_PATTERN,
-            CALENDAR_MONTH_COMPLETE_PATTERN,
-            LAST_N_DAYS_PATTERN,
-        )
-    )
-
-
-def strip_temporal_context(question: str) -> str:
-    stripped_question = TEMPORAL_CONTEXT_PATTERN.sub(" ", question)
-    stripped_question = re.sub(r"\s+", " ", stripped_question)
-    stripped_question = re.sub(r"\s+([?.!,;:])", r"\1", stripped_question)
-    return stripped_question.strip()
 
 
 def _format_guided_subject(normalized_params: RouterNormalizedParams) -> str:

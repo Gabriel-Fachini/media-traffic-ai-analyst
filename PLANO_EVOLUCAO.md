@@ -38,17 +38,17 @@ irresponsavel. Esta fase nao muda comportamento, so cria a rede de seguranca.
 
 ### Tarefas
 
-- [ ] 0.1 Extrair casos de `tests/unit/test_router.py` para um dataset de eval
+- [x] 0.1 Extrair casos de `tests/unit/test_router.py` para um dataset de eval
       (`tests/eval/router_cases.jsonl` ou `.csv`): `{question, expected_intent,
       expected_clarification_reason, expected_refusal_reason, expected_dates,
       expected_traffic_source}`.
-- [ ] 0.2 Criar runner `tests/eval/test_router_eval.py` marcado `@pytest.mark.eval`
+- [x] 0.2 Criar runner `tests/eval/test_router_eval.py` marcado `@pytest.mark.eval`
       que roda o router atual contra o dataset e calcula accuracy por campo.
-- [ ] 0.3 Registrar marker `eval` em `pyproject.toml`/`conftest.py` (seguir o
+- [x] 0.3 Registrar marker `eval` em `pyproject.toml`/`conftest.py` (seguir o
       padrao existente de `live` e `--agent`).
-- [ ] 0.4 Definir baseline: rodar contra o router deterministico atual e gravar
+- [x] 0.4 Definir baseline: rodar contra o router deterministico atual e gravar
       a accuracy de referencia em `tests/eval/BASELINE.md`.
-- [ ] 0.5 Adicionar threshold de regressao (ex: intent accuracy >= baseline).
+- [x] 0.5 Adicionar threshold de regressao (ex: intent accuracy >= baseline).
 
 ### Aceite
 
@@ -64,16 +64,18 @@ Manter normalizacao de data deterministica.
 
 ### Tarefas
 
-- [ ] 1.1 Criar `app/graph/llm_router.py` com `classify_question(question,
+- [x] 1.1 Criar `app/graph/llm_router.py` com `classify_question(question,
       thread_context) -> RouterDecision` via `with_structured_output`.
-- [ ] 1.2 Escrever o prompt do router: escopo valido/invalido, lista de canais
+- [x] 1.2 Escrever o prompt do router: escopo valido/invalido, lista de canais
       suportados, definicao de cada intent, regra de ambiguidade
       volume-vs-financeiro. Reaproveitar a semantica ja descrita em
       `app/graph/prompts.py:86`.
-- [ ] 1.3 Manter normalizacao de data deterministica: extrair as funcoes de data
+- [x] 1.3 Manter normalizacao de data deterministica: extrair as funcoes de data
       de `app/graph/router.py` (`_extract_valid_and_invalid_explicit_dates`,
       `_extract_relative_date_range`, patterns) para um modulo
       `app/graph/date_normalizer.py` e reusar. Datas continuam regex.
+      Cobertura ampliada: hoje, esta/ultima semana, ultimas N semanas,
+      este/ultimo ano alem dos formatos ja existentes.
 - [ ] 1.4 Passar contexto do thread ao router: ultimas N mensagens / ultimo
       resultado de tool, para que o router classifique follow-ups sem token lists.
 - [ ] 1.5 Substituir `build_router_decision` em `_resolve_router_turn`
