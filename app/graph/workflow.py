@@ -26,13 +26,9 @@ from app.graph.llm import (
     is_llm_timeout_error,
 )
 from app.graph.llm_router import build_router_thread_context, classify_question
-from app.graph.prompts import (
-    DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT,
-    STRATEGY_FOLLOW_UP_SYSTEM_PROMPT,
-    build_conversation_system_prompt,
-)
+from app.graph.prompts import build_conversation_system_prompt
 from app.graph.tools import get_analytics_tools
-from app.schemas.router import RouterDecision
+from app.schemas.router import RouterDecision, RouterNormalizedParams
 from app.utils.config import Settings, get_settings
 
 EMPTY_QUESTION_MESSAGE = (
@@ -326,13 +322,7 @@ def _build_follow_up_system_messages(
     if follow_up_context is None:
         return []
 
-    intent_prompt = (
-        STRATEGY_FOLLOW_UP_SYSTEM_PROMPT
-        if router_decision.intent == "strategy_follow_up"
-        else DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT
-    )
     return [
-        SystemMessage(content=intent_prompt),
         SystemMessage(
             content=(
                 "Contexto analitico anterior do mesmo thread:\n"
@@ -463,6 +453,27 @@ def build_analytics_graph(
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
         injected_messages = _build_turn_question_messages(state)
+
+        # Guard: short-circuit before any LLM call when there is no question.
+        if not question:
+            empty_decision = RouterDecision(
+                intent="out_of_scope",
+                refusal_reason="empty_question",
+                response_message=EMPTY_QUESTION_MESSAGE,
+                normalized_params=RouterNormalizedParams(),
+            )
+            return Command(
+                update={
+                    "router_decision": _serialize_router_decision(empty_decision),
+                    "resolved_question": "",
+                    "turn_start_index": turn_start_index,
+                    "debug_errors": [],
+                    "final_answer": EMPTY_QUESTION_MESSAGE,
+                    "tools_used": [],
+                },
+                goto="__end__",
+            )
+
         resolved_question, router_decision = _resolve_router_turn(state, question, settings, router_llm)
         serialized_router_decision = _serialize_router_decision(router_decision)
         state_update: dict[str, Any] = {

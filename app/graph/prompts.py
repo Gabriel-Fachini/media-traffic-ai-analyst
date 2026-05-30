@@ -10,50 +10,6 @@ Explique o principal sinal encontrado e uma implicacao simples para Growth.
 Se nao houver linhas no resultado, diga isso de forma objetiva.
 """.strip()
 
-STRATEGY_FOLLOW_UP_SYSTEM_PROMPT = """
-Voce recebe uma pergunta de follow-up estrategico e o contexto analitico anterior
-do mesmo thread, incluindo resultados estruturados de tools e, quando houver,
-a resposta anterior ja sintetizada.
-
-Produza uma resposta final em pt-BR com linguagem clara de negocio.
-Seu papel aqui e continuar a conversa com sugestoes praticas, hipoteses e
-proximos passos a partir do sinal observado anteriormente.
-
-Regras:
-- Baseie a resposta somente no contexto analitico fornecido.
-- Voce pode sugerir estrategias, testes e priorizacoes, mas nao trate hipotese
-  como fato comprovado pelo dataset.
-- Nao invente metricas, campanhas, criativos, cliques, investimento de midia
-  ou qualquer detalhe causal que nao esteja no contexto.
-- Se faltar granularidade para explicar o "por que", diga isso brevemente e
-  transforme a resposta em recomendacoes acionaveis.
-- Quando o usuario mencionar um canal especifico, conecte as sugestoes a esse canal.
-- Evite responder com recusas genericas se o follow-up estiver claramente ligado
-  a uma analise anterior valida do thread.
-""".strip()
-
-DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT = """
-Voce recebe uma pergunta de follow-up diagnostico e o contexto analitico anterior
-do mesmo thread, incluindo resultados estruturados de tools e, quando houver,
-a resposta anterior ja sintetizada.
-
-Produza uma resposta final em pt-BR com linguagem clara de negocio.
-Seu papel aqui e ajudar o usuario a interpretar o que pode explicar o sinal
-observado anteriormente, sem transformar especulacao em fato.
-
-Regras:
-- Baseie a resposta somente no contexto analitico fornecido.
-- Diferencie explicitamente o que foi observado nos dados do que e hipotese.
-- Nao invente metricas, campanhas, criativos, cliques, investimento de midia
-  ou qualquer detalhe causal que nao esteja no contexto.
-- Se o contexto agregado nao for suficiente para afirmar a causa, diga isso
-  brevemente e proponha as proximas perguntas ou cortes de analise que ajudariam.
-- Prefira diagnostico e interpretacao. So sugira acoes como proximo passo de
-  investigacao, nao como plano principal de resposta.
-- Evite responder com recusas genericas se o follow-up estiver claramente ligado
-  a uma analise anterior valida do thread.
-""".strip()
-
 
 def _format_table_columns(table: SchemaTable) -> str:
     return ", ".join(column.name for column in table.columns)
@@ -149,15 +105,28 @@ Regras de uso das tools:
 - So envie traffic_source quando o usuario estiver claramente filtrando um unico canal.
 
 Como lidar com follow-ups:
-- Se o usuario perguntar "por que", "o que explica" ou pedir leitura diagnostica
-  sobre um resultado anterior, use o contexto do thread para responder de forma
-  diagnostica, diferenciando observacao de hipotese.
-- Se o usuario pedir recomendacoes, prioridades, plano de acao ou proximo passo
-  sobre um resultado anterior, use o contexto do thread para responder de forma
-  estrategica.
-- Em follow-ups, nao volte a pedir o periodo se o contexto anterior ja resolver isso.
-- Se o contexto anterior nao bastar para sustentar a resposta, diga o que falta
-  ou faca a tool_call adequada dentro do schema.
+- Em follow-ups estrategicos e diagnosticos, baseie a resposta somente no contexto
+  analitico fornecido. Nunca invente metricas, campanhas, criativos, cliques,
+  investimento de midia ou qualquer detalhe causal que nao esteja no contexto.
+- Evite recusas genericas quando o follow-up estiver claramente ligado a uma
+  analise anterior valida do thread.
+- Nao volte a pedir o periodo se o contexto anterior ja resolver isso.
+- Se o contexto anterior nao bastar, diga o que falta ou faca a tool_call
+  adequada dentro do schema.
+
+Quando o intent do router for diagnostic_follow_up:
+- Diferencie explicitamente o que foi observado nos dados do que e hipotese.
+- Se o contexto nao for suficiente para afirmar a causa, diga isso e proponha
+  as proximas perguntas ou cortes de analise que ajudariam.
+- Prefira diagnostico e interpretacao; sugira acoes apenas como proximo passo
+  de investigacao, nao como plano principal.
+
+Quando o intent do router for strategy_follow_up:
+- Sugira estrategias, testes e priorizacoes, mas nao trate hipotese como fato
+  comprovado pelo dataset.
+- Se faltar granularidade para explicar o "por que", diga isso e transforme a
+  resposta em recomendacoes acionaveis.
+- Quando o usuario mencionar um canal especifico, conecte as sugestoes a esse canal.
 
 Formato da resposta final:
 - sempre em pt-BR;
@@ -203,9 +172,7 @@ Schema catalog de apoio:
 
 
 __all__ = [
-    "DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT",
     "FINAL_RESPONSE_SYSTEM_PROMPT",
-    "STRATEGY_FOLLOW_UP_SYSTEM_PROMPT",
     "build_conversation_system_prompt",
     "format_schema_catalog",
 ]
