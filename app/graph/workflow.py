@@ -25,6 +25,7 @@ from app.graph.llm import (
     build_tool_enabled_llm,
     is_llm_timeout_error,
 )
+from app.graph.llm_router import build_router_thread_context, classify_question
 from app.graph.prompts import (
     DIAGNOSTIC_FOLLOW_UP_SYSTEM_PROMPT,
     STRATEGY_FOLLOW_UP_SYSTEM_PROMPT,
@@ -723,8 +724,15 @@ def _router_decision_short_circuits(router_decision: RouterDecision) -> bool:
 def _resolve_router_turn(
     state: AnalyticsGraphState,
     question: str,
+    settings: Settings | None = None,
+    router_llm: Any | None = None,
 ) -> tuple[str, RouterDecision]:
-    router_decision = build_router_decision(question)
+    router_decision = classify_question(
+        question,
+        thread_context=build_router_thread_context(list(state.get("messages", []))),
+        settings=settings,
+        _router_runnable=router_llm,
+    )
     previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
     previous_ai_answer = _get_last_prior_ai_answer(state)
     follow_up_intent = _resolve_follow_up_intent(
@@ -838,6 +846,7 @@ def build_analytics_graph(
     *,
     agent_llm: Any | None = None,
     response_llm: Any | None = None,
+    router_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
     checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
@@ -854,7 +863,7 @@ def build_analytics_graph(
         question = _resolve_question(state)
         turn_start_index = _resolve_turn_start_index(state)
         injected_messages = _build_turn_question_messages(state)
-        resolved_question, router_decision = _resolve_router_turn(state, question)
+        resolved_question, router_decision = _resolve_router_turn(state, question, settings, router_llm)
         serialized_router_decision = _serialize_router_decision(router_decision)
         state_update: dict[str, Any] = {
             "router_decision": serialized_router_decision,

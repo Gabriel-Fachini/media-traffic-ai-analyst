@@ -25,6 +25,7 @@ from tests.fakes import (
     DeterministicGraphBundle,
     FakeAgentLLM,
     FakeAnalyticsTools,
+    FakeRouterRunnable,
     FakeSynthesisLLM,
     build_deterministic_graph_bundle,
 )
@@ -145,6 +146,7 @@ def test_graph_promotes_tool_failures_as_structured_execution_errors() -> None:
 
     graph = build_analytics_graph(
         agent_llm=agent_llm,
+        router_llm=FakeRouterRunnable(),
         tools=(
             StructuredTool.from_function(
                 func=raise_bigquery_failure,
@@ -554,6 +556,7 @@ def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     graph = build_analytics_graph(
         agent_llm=clarifying_agent_llm,
         response_llm=synthesis_llm,
+        router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),
     )
@@ -617,6 +620,7 @@ def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> N
     graph = build_analytics_graph(
         agent_llm=clarifying_agent_llm,
         response_llm=synthesis_llm,
+        router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),
     )

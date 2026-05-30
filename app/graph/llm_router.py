@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from app.graph.llm import build_analytics_llm
 from app.schemas.router import RouterDecision
 from app.utils.config import Settings
+
+_MAX_CONTEXT_MESSAGES = 6
 
 _ROUTER_SYSTEM_PROMPT = """
 Voce e o classificador de intencao de um agente de analytics de midia e growth.
@@ -77,13 +81,25 @@ Sempre preencher `response_message` em pt-BR quando:
 - `refusal_reason` estiver preenchido (recusa educada e objetiva)
 """.strip()
 
-_MAX_CONTEXT_MESSAGES = 6
+
+def build_router_thread_context(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Extract the last N non-system messages from a LangGraph thread for router context.
+
+    SystemMessages are internal graph instructions and must not be forwarded to the
+    router — the router has its own system prompt and mixing them corrupts the context.
+    ToolMessages are preserved because they carry the most direct signal for follow-up
+    detection: they tell the LLM "a tool was already executed in this thread."
+    """
+    non_system = [m for m in messages if not isinstance(m, SystemMessage)]
+    return non_system[-_MAX_CONTEXT_MESSAGES:]
 
 
 def classify_question(
     question: str,
     thread_context: list[BaseMessage] | None = None,
     settings: Settings | None = None,
+    *,
+    _router_runnable: Any | None = None,
 ) -> RouterDecision:
     """Classify a user question into a RouterDecision using structured output.
 
@@ -95,23 +111,28 @@ def classify_question(
         thread_context: Recent messages from the conversation thread. Used so the
             LLM can detect follow-up intent without token lists.
         settings: Optional settings override (useful in tests).
+        _router_runnable: Pre-built chain (post with_structured_output) injected
+            by tests to avoid real LLM calls. Production code leaves this None.
     """
-    base_llm = build_analytics_llm(settings)
-
-    # with_structured_output wraps the LLM in a chain:
-    #   LLM → output parser → RouterDecision instance
-    # Under the hood: OpenAI/Anthropic use function/tool calling to force the
-    # model to fill the schema fields as function arguments.
-    router_llm = base_llm.with_structured_output(RouterDecision)
+    if _router_runnable is not None:
+        active_runnable: Any = _router_runnable
+    else:
+        base_llm = build_analytics_llm(settings)
+        # with_structured_output wraps the LLM in a chain:
+        #   LLM → output parser → RouterDecision instance
+        # Under the hood: OpenAI/Anthropic use function/tool calling to force the
+        # model to fill the schema fields as function arguments.
+        active_runnable = base_llm.with_structured_output(RouterDecision)
 
     messages: list[BaseMessage] = [SystemMessage(content=_ROUTER_SYSTEM_PROMPT)]
 
     if thread_context:
-        # Trim to last N messages to keep prompt size bounded.
+        # Defensive cap: callers may pass raw state messages not pre-trimmed by
+        # build_router_thread_context.
         recent = thread_context[-_MAX_CONTEXT_MESSAGES:]
         messages.extend(recent)
 
     messages.append(HumanMessage(content=question))
 
-    result = router_llm.invoke(messages)
+    result = active_runnable.invoke(messages)
     return result  # type: ignore[return-value]

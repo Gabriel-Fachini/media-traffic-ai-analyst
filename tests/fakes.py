@@ -9,7 +9,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
+from app.graph.router import build_router_decision
 from app.graph.workflow import build_analytics_graph
+from app.schemas.router import RouterDecision
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 
 
@@ -288,6 +290,24 @@ class FakeSynthesisLLM:
 
 
 @dataclass
+class FakeRouterRunnable:
+    """Deterministic router runnable for integration tests.
+
+    Simulates the chain returned by base_llm.with_structured_output(RouterDecision).
+    Delegates to the deterministic build_router_decision so existing tests maintain
+    their expected RouterDecision outcomes without hitting a real LLM.
+    """
+
+    def invoke(self, messages: list[Any]) -> RouterDecision:
+        question = ""
+        for msg in reversed(messages):
+            if isinstance(msg, HumanMessage):
+                question = _extract_text(msg.content)
+                break
+        return build_router_decision(question)
+
+
+@dataclass
 class DeterministicGraphBundle:
     graph: Any
     agent_llm: FakeAgentLLM
@@ -302,6 +322,7 @@ def build_deterministic_graph_bundle() -> DeterministicGraphBundle:
     graph = build_analytics_graph(
         agent_llm=fake_agent_llm,
         response_llm=fake_synthesis_llm,
+        router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),
     )
