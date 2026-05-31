@@ -4,9 +4,9 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from app.graph.llm import build_analytics_llm
+from app.infra.llm import build_analytics_llm
 from app.schemas.router import RouterDecision
-from app.utils.config import Settings
+from app.infra.config import Settings
 
 _MAX_CONTEXT_MESSAGES = 6
 

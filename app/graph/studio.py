@@ -5,6 +5,6 @@ Loaded at import time (sync context) to avoid blockbuster's BlockingError.
 """
 
 from app.graph.workflow import build_analytics_graph
-from app.utils.config import get_settings
+from app.infra.env import get_settings
 
 graph = build_analytics_graph(get_settings())

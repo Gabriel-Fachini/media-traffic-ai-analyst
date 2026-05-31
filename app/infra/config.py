@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -121,28 +119,3 @@ class Settings(BaseSettings):
                     f"{credentials_path}. Verifique a configuracao no ambiente."
                 )
             self.google_application_credentials = str(credentials_path.resolve())
-
-    def apply_runtime_environment(self) -> None:
-        if self.google_application_credentials:
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
-                self.google_application_credentials
-            )
-
-        if self.openai_api_key:
-            os.environ["OPENAI_API_KEY"] = self.openai_api_key
-
-        if self.anthropic_api_key:
-            os.environ["ANTHROPIC_API_KEY"] = self.anthropic_api_key
-
-        if self.langchain_tracing_v2 and self.langchain_api_key and self.langchain_project:
-            os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
-            os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
-
-
-@lru_cache
-def get_settings() -> Settings:
-    settings = Settings()
-    settings.validate_environment()
-    settings.apply_runtime_environment()
-    return settings

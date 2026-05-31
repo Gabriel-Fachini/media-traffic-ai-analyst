@@ -11,8 +11,8 @@ from langchain_openai import ChatOpenAI
 from openai import APITimeoutError as OpenAIAPITimeoutError
 from pydantic import SecretStr
 
-from app.graph.tools import get_analytics_tools
-from app.utils.config import Settings, SettingsError, SupportedLlmProvider, get_settings
+from app.infra.config import Settings, SettingsError, SupportedLlmProvider
+from app.infra.env import get_settings
 
 DEFAULT_LLM_TEMPERATURE = 0
 
@@ -54,7 +54,8 @@ def _resolve_settings(settings: Settings | None = None) -> Settings:
         return get_settings()
 
     settings.validate_environment()
-    settings.apply_runtime_environment()
+    from app.infra.env import apply_runtime_environment
+    apply_runtime_environment(settings)
     return settings
 
 
@@ -108,6 +109,7 @@ def _build_provider_model(
 
 
 def _bind_analytics_tools(model: BaseChatModel) -> Any:
+    from app.graph.tools import get_analytics_tools  # lazy — avoids circular import
     return model.bind_tools(
         get_analytics_tools(),
         tool_choice="auto",

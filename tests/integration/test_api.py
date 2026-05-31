@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, AIMessageChunk
 import pytest
 
-from app.graph.llm import LlmTimeoutError
+from app.infra.llm import LlmTimeoutError
 from app.graph.workflow import TEMPORARY_TOOL_FAILURE_MESSAGE, ToolExecutionError
 from app.main import LLM_TIMEOUT_ERROR_MESSAGE, app, get_query_graph
 from app.schemas.api import ErrorResponse, QueryResponse

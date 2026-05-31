@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.clients.bigquery_client import BigQueryClientError
+from app.infra.bigquery import BigQueryClientError
 from app.graph.workflow import (
     AnalyticsGraphState,
     MISSING_DATES_MESSAGE,

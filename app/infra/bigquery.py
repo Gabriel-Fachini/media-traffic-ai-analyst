@@ -7,7 +7,8 @@ from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import bigquery
 
-from app.utils.config import Settings, SettingsError, get_settings
+from app.infra.config import SettingsError
+from app.infra.env import get_settings
 
 
 class BigQueryClientError(RuntimeError):
@@ -15,9 +16,11 @@ class BigQueryClientError(RuntimeError):
 
 
 class BigQueryClient:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Any | None = None) -> None:
+        from app.infra.config import Settings
+
         try:
-            self._settings = settings or get_settings()
+            self._settings: Settings = settings or get_settings()
         except SettingsError as exc:
             raise BigQueryClientError(str(exc)) from exc
 

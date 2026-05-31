@@ -26,7 +26,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command
 
-from app.graph.llm import (
+from app.infra.llm import (
     LlmTimeoutError,
     build_tool_enabled_llm,
     is_llm_timeout_error,
@@ -39,7 +39,8 @@ from app.graph.llm_router import build_router_thread_context, classify_question
 from app.graph.prompts import build_conversation_system_prompt
 from app.graph.tools import get_analytics_tools
 from app.schemas.router import RouterDecision
-from app.utils.config import Settings, get_settings
+from app.infra.config import Settings
+from app.infra.env import get_settings
 
 EMPTY_QUESTION_MESSAGE = (
     "Envie uma pergunta sobre trafego ou receita por canal para eu montar a analise."

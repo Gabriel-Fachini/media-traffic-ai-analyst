@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from google.cloud import bigquery
 
-from app.clients.bigquery_client import BigQueryClient
+from app.infra.bigquery import BigQueryClient
 from app.schemas.tools import (
     ChannelPerformanceInput,
     ChannelPerformanceOutput,

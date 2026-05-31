@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.api import QueryRequest
-from app.utils.config import Settings, SettingsError
+from app.infra.config import Settings, SettingsError
 
 
 pytestmark = pytest.mark.unit

@@ -8,13 +8,13 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage
 import pytest
 
-from app.clients.bigquery_client import BigQueryClient
+from app.infra.bigquery import BigQueryClient
 from app.graph import build_tool_enabled_llm, invoke_analytics_graph
 from app.main import app
 from app.schemas.api import QueryResponse
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 from app.tools import channel_performance_analyzer, traffic_volume_analyzer
-from app.utils.config import Settings
+from app.infra.config import Settings
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.live, pytest.mark.readiness]
