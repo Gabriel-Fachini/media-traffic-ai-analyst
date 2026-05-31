@@ -88,7 +88,6 @@ O grafo separa três responsabilidades em nodes distintos:
 | `app/agent/tools.py` | Registro canônico das tools com `StructuredTool.from_function` |
 | `app/core/analytics/*.py` | SQL, contratos tipados e transformação dos resultados analytics |
 | `app/infra/bigquery.py` | Cliente BigQuery e encapsulamento de erros de infra |
-| `app/schemas/*.py` | Shims de backward-compat dos contratos Pydantic |
 
 ### Tools
 
@@ -241,7 +240,7 @@ Variantes com output compacto para iterações rápidas: `--agent` em qualquer d
 O repositório versiona hooks do Claude Code em `.claude/` que tornam mecânicas as invariantes do projeto durante o desenvolvimento assistido por IA:
 
 - bloqueio de leitura/edição de segredos (`.env`, `credentials/*.json`);
-- bloqueio de SQL não-parametrizada em `app/core/analytics/queries.py`, `app/tools/` e no cliente BigQuery;
+- bloqueio de SQL não-parametrizada em `app/core/analytics/queries.py` e no cliente BigQuery;
 - `ruff check` automático no arquivo Python recém-editado.
 
 Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
@@ -250,16 +249,11 @@ Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
 
 ```text
 app/
-  agent/        # workflow LangGraph, prompts e registry de tools
-  api/          # FastAPI, SSE e observabilidade
+  agent/        # workflow LangGraph, nodes, state, prompts, tools, studio
+  api/          # FastAPI, SSE, observabilidade, schemas HTTP
   cli/          # CLI conversacional
-  core/         # datas, router e analytics
-  graph/        # shims de backward-compat
+  core/         # lógica pura: datas, router, analytics (models, queries, analyzers)
   infra/        # BigQuery, LLMs e settings
-  schemas/      # shims de backward-compat
-  tools/        # shims de backward-compat
-  main.py       # entrypoint FastAPI backward-compatible
-  verify.py     # gate local sem testes
 tests/
   unit/
   integration/
@@ -267,8 +261,10 @@ tests/
   readiness/
   eval/         # eval harness do router LLM (accuracy por campo)
 scripts/
+  verify.py               # gate local: ruff + compileall + pyright
   run_local_chat.sh       # sobe API + abre CLI com --debug
   run_readiness_checks.sh
+  eval_router_langsmith.py
 .claude/
   hooks/        # guardrails de desenvolvimento (segredos, SQL, ruff)
 ```
