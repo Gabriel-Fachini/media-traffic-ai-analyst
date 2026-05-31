@@ -2,7 +2,7 @@
 
 from app.infra.llm import build_analytics_llm, build_tool_enabled_llm
 from app.graph.tools import get_analytics_tools
-from app.graph.workflow import (
+from app.agent.graph import (
     AnalyticsGraphState,
     ToolExecutionError,
     astream_analytics_graph_events,
