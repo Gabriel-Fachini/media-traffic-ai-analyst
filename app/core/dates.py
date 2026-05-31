@@ -126,6 +126,36 @@ def _extract_valid_and_invalid_explicit_dates(
     return valid_dates, invalid_dates
 
 
+def extract_explicit_date_range(
+    question: str,
+) -> tuple[tuple[date, date] | None, list[str]]:
+    """Resolve explicit dates in appearance order."""
+    valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
+    if invalid_dates:
+        return None, invalid_dates
+    if len(valid_dates) >= 2:
+        start_date, end_date = valid_dates[0], valid_dates[1]
+        if start_date > end_date:
+            return None, ["inverted"]
+        return (start_date, end_date), []
+    if len(valid_dates) == 1:
+        single_date = valid_dates[0]
+        return (single_date, single_date), []
+    return None, []
+
+
+def resolve_date_range(
+    question: str,
+    *,
+    reference_date: date | None = None,
+) -> tuple[tuple[date, date] | None, list[str]]:
+    """Resolve explicit dates first, then relative periods."""
+    explicit_range, explicit_invalid = extract_explicit_date_range(question)
+    if explicit_range is not None or explicit_invalid:
+        return explicit_range, explicit_invalid
+    return extract_relative_date_range(question, reference_date=reference_date)
+
+
 def _match_today(reference_date: date) -> tuple[date, date]:
     """Return (reference_date, reference_date) as a single-day range."""
     return reference_date, reference_date

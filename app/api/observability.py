@@ -47,13 +47,14 @@ def _build_turn_observability(
     *,
     latency_ms: int | None,
     llm_call_count: int,
+    tool_call_count: int,
     tools_used: list[str],
     token_usage: TokenUsage | None = None,
 ) -> TurnObservability:
     return TurnObservability(
         latency_ms=latency_ms,
         llm_call_count=llm_call_count,
-        tool_call_count=len(tools_used),
+        tool_call_count=tool_call_count,
         tools_used=tools_used,
         token_usage=token_usage or TokenUsage(),
     )
@@ -65,7 +66,7 @@ def _extract_turn_observability_from_state(
     latency_ms: int | None,
 ) -> TurnObservability:
     current_turn_messages = get_current_turn_messages(state)
-    llm_call_count = 0
+    llm_call_count = int(state.get("router_llm_call_count", 0) or 0)
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
@@ -81,9 +82,11 @@ def _extract_turn_observability_from_state(
 
     tools_used = state.get("tools_used", [])
     resolved_tools_used = tools_used if isinstance(tools_used, list) else []
+    tool_execution_count = int(state.get("tool_execution_count", 0) or 0)
     return _build_turn_observability(
         latency_ms=latency_ms,
         llm_call_count=llm_call_count,
+        tool_call_count=tool_execution_count,
         tools_used=cast(list[str], resolved_tools_used),
         token_usage=TokenUsage(
             input_tokens=input_tokens,
@@ -162,6 +165,7 @@ def build_timeout_debug_info(
         observability=_build_turn_observability(
             latency_ms=latency_ms,
             llm_call_count=0,
+            tool_call_count=0,
             tools_used=[],
         ),
     )
@@ -187,6 +191,7 @@ def build_tool_execution_debug_info(
         observability=_build_turn_observability(
             latency_ms=latency_ms,
             llm_call_count=0,
+            tool_call_count=len(tools_used),
             tools_used=tools_used,
         ),
     )

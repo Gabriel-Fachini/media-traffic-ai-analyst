@@ -272,8 +272,8 @@ O comando executa:
 - Fase 0 (eval harness): concluida — `tests/eval/` com `router_cases.jsonl`,
   `test_router_eval.py` (marker `eval`), baseline documentado.
 - Fase 1 (router LLM): concluida — `app/core/router/classifier.py` (classify_question),
-  `app/core/dates.py` (datas deterministicas), router deterministico movido para
-  `tests/deterministic_router.py`. Shims em `app/graph/llm_router.py` e
+  `app/core/dates.py` (datas deterministicas), harness offline em
+  `tests/eval/test_router_eval.py`. Shims em `app/graph/llm_router.py` e
   `app/graph/date_normalizer.py` preservam backward-compat.
 - Fase 2 (observabilidade + streaming): em andamento
   - 2.1 LangSmith opt-in: concluido
@@ -312,5 +312,5 @@ seguro: erro proprio -> exit 0, nunca travam o trabalho).
 | Hook | Evento | Matcher | Acao |
 |---|---|---|---|
 | `guard_secrets.py` | `PreToolUse` | `Read\|Edit\|Write\|NotebookEdit\|Bash` | **Bloqueia** (exit 2) leitura/edicao de `.env`, `credentials/*.json`, `google.json`; pega tambem `cat`/`head`/etc no Bash. `.env.example` liberado. Protege chaves OpenAI/Anthropic e service account GCP de vazar no contexto. |
-| `guard_sql.py` | `PreToolUse` | `Edit\|Write` | **Bloqueia** (exit 2) SQL nao-parametrizada (f-string/`.format()`/`%`/concat perto de keyword SQL) em `app/tools/*.py` e `bigquery_client.py`. Torna mecanica a invariante "SQL sempre parametrizada". |
+| `guard_sql.py` | `PreToolUse` | `Edit\|Write` | **Bloqueia** (exit 2) SQL nao-parametrizada (f-string/`.format()`/`%`/concat perto de keyword SQL) em `app/core/analytics/queries.py`, `app/tools/*.py` e `app/infra/bigquery.py`. Torna mecanica a invariante "SQL sempre parametrizada". |
 | `post_edit_ruff.py` | `PostToolUse` | `Edit\|Write` | Roda `poetry run ruff check <arquivo>` em `.py` sob `app/`/`scripts/`/`tests/`. Erros voltam como feedback (exit 2). Pyright/compileall seguem no gate manual `verify`. |

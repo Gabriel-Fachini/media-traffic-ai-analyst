@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -156,8 +157,26 @@ def overall_accuracy(runs: Sequence[Any], examples: Sequence[Any]) -> Evaluation
 
 
 def _langsmith_configured() -> bool:
-    s = get_settings()
-    return bool(s.langchain_tracing_v2 and s.langchain_api_key and s.langchain_project)
+    return (
+        os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower() == "true"
+        and bool(os.getenv("LANGCHAIN_API_KEY", "").strip())
+        and bool(os.getenv("LANGCHAIN_PROJECT", "").strip())
+    )
+
+
+def _result_has_failures(results: Any) -> bool:
+    results.wait()
+    summary_results = getattr(results, "_summary_results", {}) or {}
+    for item in summary_results.get("results", []):
+        if item.get("key") == "overall_field_accuracy" and (item.get("score") or 0) < 1.0:
+            return True
+
+    for row in results:
+        for item in row.get("evaluation_results", {}).get("results", []):
+            score = item.get("score")
+            if score is not None and score < 1:
+                return True
+    return False
 
 
 def main() -> int:
@@ -206,7 +225,7 @@ def main() -> int:
 
     print(f"\nExperiment concluido: {results.experiment_name}")
     print("Veja os traces e metricas no LangSmith.")
-    return 0
+    return 1 if _result_has_failures(results) else 0
 
 
 if __name__ == "__main__":

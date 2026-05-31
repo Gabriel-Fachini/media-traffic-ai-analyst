@@ -1,7 +1,7 @@
 """LangGraph-ready building blocks for the analytics workflow."""
 
 from app.infra.llm import build_analytics_llm, build_tool_enabled_llm
-from app.graph.tools import get_analytics_tools
+from app.agent.tools import get_analytics_tools
 from app.agent.graph import (
     AnalyticsGraphState,
     ToolExecutionError,

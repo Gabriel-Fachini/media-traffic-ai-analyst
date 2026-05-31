@@ -28,7 +28,7 @@ from app.agent.nodes import (
 )
 from app.agent.prompts import build_conversation_system_prompt
 from app.agent.state import AnalyticsGraphState, ToolExecutionError
-from app.graph.tools import get_analytics_tools
+from app.agent.tools import get_analytics_tools
 from app.infra.config import Settings
 from app.infra.env import get_settings
 from app.infra.llm import build_tool_enabled_llm

@@ -24,6 +24,10 @@ from app.cli.rendering import (
 from rich.live import Live
 
 
+class SseDecodeError(RuntimeError):
+    """Raised when the SSE payload cannot be decoded as JSON."""
+
+
 def _resolve_stream_api_url(api_url: str) -> str:
     normalized = api_url.rstrip("/")
     if normalized.endswith("/query/stream"):
@@ -46,7 +50,10 @@ def _iter_sse_events(lines: Iterable[str]) -> Iterator[tuple[str, Any]]:
         line = raw_line.strip("\r")
         if not line:
             if event_name is not None:
-                payload = json.loads("\n".join(data_lines)) if data_lines else None
+                try:
+                    payload = json.loads("\n".join(data_lines)) if data_lines else None
+                except json.JSONDecodeError as exc:
+                    raise SseDecodeError(f"Payload SSE invalido: {exc}") from exc
                 yield event_name, payload
             event_name = None
             data_lines = []
@@ -60,7 +67,10 @@ def _iter_sse_events(lines: Iterable[str]) -> Iterator[tuple[str, Any]]:
             data_lines.append(line.removeprefix("data: "))
 
     if event_name is not None:
-        payload = json.loads("\n".join(data_lines)) if data_lines else None
+        try:
+            payload = json.loads("\n".join(data_lines)) if data_lines else None
+        except json.JSONDecodeError as exc:
+            raise SseDecodeError(f"Payload SSE invalido: {exc}") from exc
         yield event_name, payload
 
 
@@ -278,6 +288,15 @@ def _submit_question(
                     title="Debug HTTP",
                 )
             )
+        return None
+    except SseDecodeError as exc:
+        console.print(
+            _build_error_panel(
+                "O stream SSE da API veio malformado e este turno foi encerrado. "
+                f"Detalhe: {exc}",
+                title="Stream Invalido",
+            )
+        )
         return None
 
     if error_response is not None:

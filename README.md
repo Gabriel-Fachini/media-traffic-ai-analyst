@@ -59,7 +59,7 @@ O grafo separa três responsabilidades em nodes distintos:
 
 ### Decisões de design notáveis
 
-**Router LLM com normalização de datas determinística.** A classificação de intent, escopo e detecção de follow-up é feita por LLM com `with_structured_output(RouterDecision)` (`app/graph/llm_router.py`), recebendo o contexto do thread. A normalização de `start_date`/`end_date` permanece determinística (`app/graph/date_normalizer.py`), porque data é barata, exata e testável sem gastar tokens. Híbrido consciente: delega ao LLM só o que ele faz melhor (variação de linguagem natural), mantém regra onde regra ganha. Antes do router, um guard determinístico faz short-circuit de pergunta vazia sem chamar o LLM.
+**Router LLM com normalização de datas determinística.** A classificação de intent, escopo e detecção de follow-up é feita por LLM com `with_structured_output(RouterDecision)` (`app/core/router/classifier.py`), recebendo o contexto do thread. A normalização de `start_date`/`end_date` permanece determinística (`app/core/dates.py` + `app/core/router/date_resolution.py`), porque data é barata, exata e testável sem gastar tokens. Híbrido consciente: delega ao LLM só o que ele faz melhor (variação de linguagem natural), mantém regra onde regra ganha. Antes do router, um guard determinístico faz short-circuit de pergunta vazia sem chamar o LLM.
 
 **Eval antes de evoluir.** O router LLM é não-determinístico; mexer nele sem medir seria irresponsável. `tests/eval/` roda o router contra um dataset de casos (`router_cases.jsonl`) e reporta accuracy por campo, com baseline documentado — `poetry run pytest -m eval`.
 
@@ -79,16 +79,16 @@ O grafo separa três responsabilidades em nodes distintos:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `app/main.py` | Superfície HTTP, contratos de entrada/saída, `/query`, `/query/stream`, `X-Debug`, tratamento de timeout do LLM |
-| `app/cli.py` | CLI conversacional via API local consumindo SSE |
-| `app/graph/workflow.py` | StateGraph: nodes `preprocess → agent → tool_executor`, roteamento via `Command(goto=...)`, loop de tool calling |
-| `app/graph/llm_router.py` | Router LLM: `classify_question` com `with_structured_output(RouterDecision)`, contexto do thread |
-| `app/graph/date_normalizer.py` | Normalização determinística de datas (absolutas e relativas) |
-| `app/graph/prompts.py` | Política conversacional, síntese de dados, follow-ups estratégicos e diagnósticos |
-| `app/graph/tools.py` | Registro das tools com `StructuredTool.from_function` |
-| `app/tools/*.py` | Queries SQL e mapeamento para outputs tipados |
-| `app/clients/bigquery_client.py` | Cliente BigQuery e encapsulamento de erros de infra |
-| `app/schemas/*.py` | Contratos Pydantic da API, router e tools |
+| `app/api/routes.py` | Superfície HTTP, contratos de entrada/saída, `/query`, `/query/stream`, `X-Debug`, tratamento de timeout do LLM |
+| `app/cli/app.py` | CLI conversacional via API local consumindo SSE |
+| `app/agent/graph.py` | StateGraph: nodes `preprocess → agent → tool_executor`, roteamento via `Command(goto=...)`, loop de tool calling |
+| `app/core/router/classifier.py` | Router LLM: `classify_question` com `with_structured_output(RouterDecision)`, contexto do thread |
+| `app/core/dates.py` | Normalização determinística de datas absolutas e relativas |
+| `app/agent/prompts.py` | Política conversacional, síntese de dados, follow-ups estratégicos e diagnósticos |
+| `app/agent/tools.py` | Registro canônico das tools com `StructuredTool.from_function` |
+| `app/core/analytics/*.py` | SQL, contratos tipados e transformação dos resultados analytics |
+| `app/infra/bigquery.py` | Cliente BigQuery e encapsulamento de erros de infra |
+| `app/schemas/*.py` | Shims de backward-compat dos contratos Pydantic |
 
 ### Tools
 
@@ -202,7 +202,7 @@ Qualquer request pode incluir o header `X-Debug: true`. A resposta passa a conte
       "agent_tool_calls": [...],
       "observability": {
         "latency_ms": 187,
-        "llm_call_count": 2,
+        "llm_call_count": 3,
         "tool_call_count": 1,
         "tools_used": ["channel_performance_analyzer"],
         "token_usage": {
@@ -241,7 +241,7 @@ Variantes com output compacto para iterações rápidas: `--agent` em qualquer d
 O repositório versiona hooks do Claude Code em `.claude/` que tornam mecânicas as invariantes do projeto durante o desenvolvimento assistido por IA:
 
 - bloqueio de leitura/edição de segredos (`.env`, `credentials/*.json`);
-- bloqueio de SQL não-parametrizada em `app/tools/` e no cliente BigQuery;
+- bloqueio de SQL não-parametrizada em `app/core/analytics/queries.py`, `app/tools/` e no cliente BigQuery;
 - `ruff check` automático no arquivo Python recém-editado.
 
 Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
@@ -250,12 +250,15 @@ Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
 
 ```text
 app/
-  clients/      # BigQuery client e erros de infraestrutura
-  graph/        # llm_router, date_normalizer, prompts, binding de tools, workflow LangGraph
-  schemas/      # contratos Pydantic
-  tools/        # queries SQL e analyzers
-  cli.py        # CLI conversacional
-  main.py       # API FastAPI
+  agent/        # workflow LangGraph, prompts e registry de tools
+  api/          # FastAPI, SSE e observabilidade
+  cli/          # CLI conversacional
+  core/         # datas, router e analytics
+  graph/        # shims de backward-compat
+  infra/        # BigQuery, LLMs e settings
+  schemas/      # shims de backward-compat
+  tools/        # shims de backward-compat
+  main.py       # entrypoint FastAPI backward-compatible
   verify.py     # gate local sem testes
 tests/
   unit/

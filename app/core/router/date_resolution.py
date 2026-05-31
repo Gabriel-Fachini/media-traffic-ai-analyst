@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 
-from app.core.dates import extract_relative_date_range, question_contains_temporal_signal
+from app.agent.messages import INVALID_DATES_MESSAGE
+from app.core.dates import question_contains_temporal_signal, resolve_date_range
 from app.core.router.decision import RouterDecision
 
 
@@ -16,7 +17,18 @@ def apply_date_normalizer(question: str, decision: RouterDecision) -> RouterDeci
     if not question_contains_temporal_signal(question):
         return decision
 
-    date_range, _ = extract_relative_date_range(question)
+    date_range, invalid_tokens = resolve_date_range(question)
+    if invalid_tokens:
+        return RouterDecision(
+            intent=decision.intent,
+            traffic_source=decision.traffic_source,
+            start_date=None,
+            end_date=None,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            refusal_reason=decision.refusal_reason,
+            response_message=INVALID_DATES_MESSAGE,
+        )
     if date_range is None:
         if decision.start_date is not None or decision.end_date is not None:
             return decision
@@ -45,7 +57,11 @@ def apply_date_normalizer(question: str, decision: RouterDecision) -> RouterDeci
 
 
 def inherit_dates_from_thread(
-    thread_context: list[BaseMessage], decision: RouterDecision
+    thread_context: list[BaseMessage],
+    decision: RouterDecision,
+    *,
+    previous_router_decision: RouterDecision | None = None,
+    previous_tools_used: list[str] | None = None,
 ) -> RouterDecision:
     """Inherit temporal context from the most recent human message that had a date.
 
@@ -53,14 +69,35 @@ def inherit_dates_from_thread(
     - Turn N had dates + metric clarification → turn N+1 resolves metric without repeating date.
     - Turn N had dates + tool executed → turn N+1 asks about same scope without repeating date.
     """
+    if (
+        previous_router_decision is not None
+        and not (previous_tools_used or [])
+        and not any(isinstance(msg, ToolMessage) for msg in thread_context)
+        and previous_router_decision.start_date is not None
+        and previous_router_decision.end_date is not None
+    ):
+        return RouterDecision(
+            intent=decision.intent,
+            traffic_source=decision.traffic_source,
+            start_date=previous_router_decision.start_date,
+            end_date=previous_router_decision.end_date,
+            needs_clarification=False,
+            clarification_reason=None,
+            refusal_reason=decision.refusal_reason,
+            response_message=None,
+        )
+
+    if previous_tools_used or any(isinstance(msg, ToolMessage) for msg in thread_context):
+        return decision
+
     for msg in reversed(thread_context):
         if not isinstance(msg, HumanMessage):
             continue
         text = msg.content if isinstance(msg.content, str) else ""
         if not question_contains_temporal_signal(text):
             continue
-        date_range, _ = extract_relative_date_range(text)
-        if date_range is None:
+        date_range, invalid_tokens = resolve_date_range(text)
+        if date_range is None or invalid_tokens:
             continue
         resolved_start, resolved_end = date_range
         return RouterDecision(

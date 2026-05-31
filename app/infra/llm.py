@@ -109,7 +109,7 @@ def _build_provider_model(
 
 
 def _bind_analytics_tools(model: BaseChatModel) -> Any:
-    from app.graph.tools import get_analytics_tools  # lazy — avoids circular import
+    from app.agent.tools import get_analytics_tools  # lazy — avoids circular import
     return model.bind_tools(
         get_analytics_tools(),
         tool_choice="auto",

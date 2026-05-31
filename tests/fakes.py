@@ -394,10 +394,13 @@ _FAKE_SOURCE_MAP: dict[str, str] = {
     "instagram": "Instagram",
 }
 _FAKE_PERFORMANCE_TOKENS: frozenset[str] = frozenset(
-    {"receita", "pedido", "pedidos", "revenue", "performance", "melhor", "ranking", "faturamento"}
+    {"receita", "pedido", "pedidos", "revenue", "performance", "ranking", "faturamento", "vendeu"}
 )
 _FAKE_VOLUME_TOKENS: frozenset[str] = frozenset(
     {"usuario", "usuarios", "trafego", "traffic", "volume"}
+)
+_FAKE_AMBIGUOUS_ANALYTICS_TOKENS: frozenset[str] = frozenset(
+    {"melhor", "melhores", "pior", "piores", "performou", "performando"}
 )
 
 
@@ -428,25 +431,8 @@ def _fake_classify(question: str) -> RouterDecision:
     elif relative_range is not None:
         start_date, end_date = relative_range
 
-    if invalid_dates or invalid_relative:
-        return RouterDecision(
-            intent="channel_performance",
-            traffic_source=traffic_source,
-            needs_clarification=True,
-            clarification_reason="invalid_dates",
-            response_message=INVALID_DATES_MESSAGE,
-        )
-
     has_performance = bool(_FAKE_PERFORMANCE_TOKENS & tokens)
     has_volume = bool(_FAKE_VOLUME_TOKENS & tokens)
-
-    # No analytics context at all — out_of_scope triggers merge in FakeRouterRunnable.
-    if not has_performance and not has_volume and traffic_source is None:
-        return RouterDecision(
-            intent="out_of_scope",
-            refusal_reason="out_of_scope",
-            response_message=OUT_OF_SCOPE_MESSAGE,
-        )
 
     if has_performance:
         intent = "channel_performance"
@@ -454,6 +440,30 @@ def _fake_classify(question: str) -> RouterDecision:
         intent = "traffic_volume"
     else:
         intent = "ambiguous_analytics"
+
+    if invalid_dates or invalid_relative:
+        return RouterDecision(
+            intent=intent,
+            traffic_source=traffic_source,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
+    has_ambiguous_analytics = bool(_FAKE_AMBIGUOUS_ANALYTICS_TOKENS & tokens)
+
+    # No analytics context at all — out_of_scope triggers merge in FakeRouterRunnable.
+    if (
+        not has_performance
+        and not has_volume
+        and not has_ambiguous_analytics
+        and traffic_source is None
+    ):
+        return RouterDecision(
+            intent="out_of_scope",
+            refusal_reason="out_of_scope",
+            response_message=OUT_OF_SCOPE_MESSAGE,
+        )
 
     if start_date is None:
         return RouterDecision(
@@ -473,10 +483,31 @@ def _fake_classify(question: str) -> RouterDecision:
 
 
 _DIAGNOSTIC_WORDS: frozenset[str] = frozenset(
-    {"explica", "explicar", "causa", "hipotese", "diagnostico", "motivo"}
+    {
+        "explica",
+        "explicar",
+        "causa",
+        "hipotese",
+        "diagnostico",
+        "motivo",
+        "melhor",
+        "pior",
+    }
 )
 _STRATEGY_WORDS: frozenset[str] = frozenset(
-    {"acao", "acoes", "priorizar", "recomend", "sugest", "plano", "melhorar", "fortalecer"}
+    {
+        "acao",
+        "acoes",
+        "priorizar",
+        "recomend",
+        "sugest",
+        "plano",
+        "melhorar",
+        "fortalecer",
+        "monte",
+        "retorne",
+        "analise",
+    }
 )
 _GENERIC_FOLLOW_UP_WORDS: frozenset[str] = frozenset(
     {"ajude", "ajudar", "continue", "continuar", "segue", "seguir", "siga"}

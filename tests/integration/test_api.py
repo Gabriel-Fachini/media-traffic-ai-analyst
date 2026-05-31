@@ -79,7 +79,7 @@ def test_query_debug_includes_turn_observability(
     assert body.metadata.debug is not None
     assert body.metadata.debug.observability is not None
     assert body.metadata.debug.observability.latency_ms is not None
-    assert body.metadata.debug.observability.llm_call_count == 2
+    assert body.metadata.debug.observability.llm_call_count == 3
     assert body.metadata.debug.observability.tool_call_count == 1
     assert body.metadata.debug.observability.tools_used == ["traffic_volume_analyzer"]
     assert body.metadata.debug.observability.token_usage.input_tokens == 50
@@ -388,7 +388,7 @@ def test_query_stream_final_event_includes_debug_observability(
     assert response.status_code == 200
     assert events[-1]["event"] == "final"
     assert debug_payload["observability"]["latency_ms"] is not None
-    assert debug_payload["observability"]["llm_call_count"] == 2
+    assert debug_payload["observability"]["llm_call_count"] == 3
     assert debug_payload["observability"]["tool_call_count"] == 1
     assert debug_payload["observability"]["tools_used"] == ["traffic_volume_analyzer"]
     assert debug_payload["observability"]["token_usage"]["total_tokens"] == 82

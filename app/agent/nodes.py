@@ -23,6 +23,7 @@ from app.agent.messages import (
     _build_temporary_failure_ai_message,
     _build_turn_question_messages,
     _collect_tools_used,
+    _get_last_human_question,
     _is_successful_tool_message,
     _resolve_question,
     _resolve_turn_start_index,
@@ -345,7 +346,9 @@ def _resolve_router_turn(
     router_llm: Any | None = None,
 ) -> tuple[str, RouterDecision]:
     from app.core.router.classifier import build_router_thread_context, classify_question
+
     thread_context = build_router_thread_context(list(state.get("messages", [])))
+    previous_router_decision = _deserialize_router_decision(state.get("router_decision"))
     decision = classify_question(
         question,
         thread_context=thread_context,
@@ -353,8 +356,34 @@ def _resolve_router_turn(
         _router_runnable=router_llm,
     )
     decision = apply_date_normalizer(question, decision)
+    if (
+        previous_router_decision is not None
+        and previous_router_decision.needs_clarification
+        and previous_router_decision.clarification_reason == "missing_dates"
+    ):
+        previous_question = _get_last_human_question(thread_context)
+        if previous_question:
+            combined_question = f"{previous_question.rstrip()} {question.strip()}".strip()
+            combined_decision = classify_question(
+                combined_question,
+                thread_context=thread_context,
+                settings=settings,
+                _router_runnable=router_llm,
+            )
+            combined_decision = apply_date_normalizer(combined_question, combined_decision)
+            if (
+                not combined_decision.needs_clarification
+                and combined_decision.refusal_reason is None
+            ):
+                return combined_question, combined_decision
+
     if decision.needs_clarification and decision.clarification_reason == "missing_dates":
-        decision = inherit_dates_from_thread(thread_context, decision)
+        decision = inherit_dates_from_thread(
+            thread_context,
+            decision,
+            previous_router_decision=previous_router_decision,
+            previous_tools_used=state.get("tools_used", []),
+        )
     return question, decision
 
 
@@ -380,6 +409,8 @@ def build_preprocess_node(
                     "router_decision": _serialize_router_decision(empty_decision),
                     "resolved_question": "",
                     "turn_start_index": turn_start_index,
+                    "router_llm_call_count": 0,
+                    "tool_execution_count": 0,
                     "debug_errors": [],
                     "final_answer": EMPTY_QUESTION_MESSAGE,
                     "tools_used": [],
@@ -395,6 +426,8 @@ def build_preprocess_node(
             "router_decision": serialized_router_decision,
             "resolved_question": resolved_question,
             "turn_start_index": turn_start_index,
+            "router_llm_call_count": 1,
+            "tool_execution_count": 0,
             "debug_errors": [],
         }
 
@@ -531,7 +564,11 @@ def build_tool_executor_node(tools_by_name: dict[str, Any]) -> Any:
                     resolved_question=resolved_question,
                 ) from exc
 
-        result_state: dict[str, Any] = {"messages": tool_messages}
+        result_state: dict[str, Any] = {
+            "messages": tool_messages,
+            "tool_execution_count": int(state.get("tool_execution_count", 0) or 0)
+            + len(tool_messages),
+        }
         if debug_errors:
             result_state["debug_errors"] = debug_errors
         return result_state

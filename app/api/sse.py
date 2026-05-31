@@ -68,7 +68,7 @@ def extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any]
             if chunk.tool_call_chunks or chunk.tool_calls:
                 return None
             text_delta = content_to_text(chunk.content)
-            if text_delta.strip():
+            if text_delta:
                 return {"text_delta": text_delta}
         return None
 
@@ -91,7 +91,7 @@ def extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any]
     if not isinstance(last_message, AIMessage) or last_message.tool_calls:
         return None
 
-    content = content_to_text(last_message.content).strip()
+    content = content_to_text(last_message.content)
     if not content:
         return None
 
@@ -123,6 +123,8 @@ async def stream_query_events(
     )
 
     try:
+        saw_text_delta = False
+        last_snapshot_text: str | None = None
         async for raw_event in astream_analytics_graph_events(
             request.question,
             thread_id=thread_id,
@@ -155,6 +157,14 @@ async def stream_query_events(
 
             token_payload = extract_agent_token_sse_payload(raw_event)
             if token_payload is not None:
+                text_delta = token_payload.get("text_delta")
+                if isinstance(text_delta, str):
+                    saw_text_delta = True
+                snapshot_text = token_payload.get("text")
+                if isinstance(snapshot_text, str):
+                    if saw_text_delta or snapshot_text == last_snapshot_text:
+                        continue
+                    last_snapshot_text = snapshot_text
                 yield format_sse_event("token", token_payload)
 
             final_state = extract_final_state(raw_event)

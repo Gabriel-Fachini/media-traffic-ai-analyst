@@ -81,7 +81,10 @@ def test_api_surface_covers_thread_context_and_debug(client: TestClient) -> None
     assert second_body.metadata.thread_id == thread_id
     assert second_body.metadata.context_message_count > first_body.metadata.context_message_count
     assert second_body.metadata.debug is not None
-    assert second_body.metadata.debug.resolved_question == "Entre 2024-01-01 e 2024-01-31."
+    assert (
+        second_body.metadata.debug.resolved_question
+        == "Qual foi a receita de Search? Entre 2024-01-01 e 2024-01-31."
+    )
     assert second_body.metadata.debug.router_intent == "channel_performance"
     assert second_body.metadata.debug.agent_tool_calls
     assert (
@@ -138,7 +141,10 @@ def test_graph_merges_missing_dates_follow_up() -> None:
     )
 
     assert _require_str(first_state, "final_answer") == MISSING_DATES_MESSAGE
-    assert _require_str(second_state, "resolved_question") == "Entre 2024-01-01 e 2024-01-31."
+    assert (
+        _require_str(second_state, "resolved_question")
+        == "Qual foi a receita de Search? Entre 2024-01-01 e 2024-01-31."
+    )
     assert "channel_performance_analyzer" in _require_list(second_state, "tools_used")
 
 

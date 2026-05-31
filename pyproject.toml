@@ -43,6 +43,7 @@ testpaths = ["tests"]
 markers = [
 	"unit: deterministic unit tests for pure business logic and contracts",
 	"integration: deterministic integration tests for workflow and API behavior",
+	"eval: offline regression gate for router behavior",
 	"live: opt-in tests that use real BigQuery and/or LLM providers",
 	"readiness: curated readiness checks for the highest-priority delivery scenarios",
 ]

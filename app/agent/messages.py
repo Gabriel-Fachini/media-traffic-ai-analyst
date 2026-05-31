@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
 
 from app.agent.state import AnalyticsGraphState
 
@@ -91,7 +92,7 @@ def _is_successful_tool_message(message: AnyMessage) -> bool:
     return isinstance(message, ToolMessage) and message.status != "error"
 
 
-def _get_last_human_question(messages: list[AnyMessage]) -> str:
+def _get_last_human_question(messages: Sequence[BaseMessage]) -> str:
     for message in reversed(messages):
         if isinstance(message, HumanMessage):
             question = content_to_text(message.content).strip()

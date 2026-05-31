@@ -12,6 +12,8 @@ class AnalyticsGraphState(TypedDict, total=False):
     router_decision: dict[str, Any]
     resolved_question: str
     turn_start_index: int
+    router_llm_call_count: int
+    tool_execution_count: int
     final_answer: str
     tools_used: list[str]
     debug_errors: list[dict[str, Any]]
