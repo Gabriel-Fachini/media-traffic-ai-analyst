@@ -1,10 +1,23 @@
 # Plano de Evolucao - Media Traffic AI Analyst
 
 Objetivo: elevar o projeto de "muita heuristica de linguagem bem testada" para
-"agente LangChain/LangGraph medido, observavel e enxuto". O eixo central e
+"agente LangChain/LangGraph medido, observavel e enxuto". O eixo central era
 substituir o preprocessor deterministico (~2200 linhas de regex/frozensets em
 `app/graph/router.py` + metade de `app/graph/workflow.py`) por um router
 LLM-based com structured output, sustentado por um harness de eval.
+
+## Status
+
+- **Fase 0 (eval harness): concluida.**
+- **Fase 1 (router LLM): concluida.** O preprocessor deterministico foi removido;
+  `app/graph/router.py` nao existe mais (router LLM em `app/graph/llm_router.py`,
+  normalizacao de datas em `app/graph/date_normalizer.py`).
+- **Fases 2-5: roadmap aberto** — observabilidade/streaming, visualizacao,
+  persistencia duravel, UI de chat.
+
+> A secao "Estado atual relevante" abaixo descreve o ponto de partida
+> (pre-Fase-1) e fica preservada como registro da motivacao. Referencias a
+> `app/graph/router.py` e a numeros de linha refletem aquele estado, nao o atual.
 
 ## Principios de senioridade que o plano demonstra
 

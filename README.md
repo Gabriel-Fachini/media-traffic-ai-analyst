@@ -2,20 +2,23 @@
 
 Agente conversacional de analytics para Mídia e Growth que interpreta perguntas em linguagem natural, consulta o dataset público `bigquery-public-data.thelook_ecommerce` via tool calling real e responde com leitura de negócio em português.
 
+> **Projeto de portfólio.** O objetivo não é cobrir todo o domínio de analytics, e sim demonstrar engenharia de agentes LLM com decisões deliberadas: roteamento por LLM com structured output, normalização determinística onde determinismo é barato e exato, SQL sempre parametrizada, contratos Pydantic tipados ponta a ponta e um harness de avaliação (`eval`) que mede o agente antes de evoluí-lo. O roadmap de evolução está em [`PLANO_EVOLUCAO.md`](PLANO_EVOLUCAO.md).
+
 ## Stack
 
 - **Orquestração:** LangGraph (StateGraph com checkpointing in-memory)
+- **Roteamento:** classificação de intent por LLM com `with_structured_output(RouterDecision)`; normalização de datas determinística
 - **API:** FastAPI
 - **CLI:** `analyst-chat` — cliente conversacional que consome a API local
 - **LLM:** OpenAI ou Anthropic (configurável por env, com fallback entre providers)
 - **Dados:** Google BigQuery via cliente oficial Python, SQL parametrizada
 - **Tipagem e contratos:** Pydantic v2, type hints, Pyright
-- **Qualidade:** Ruff, `compileall`, pytest (unit + integration + live opt-in)
+- **Qualidade:** Ruff, `compileall`, pytest (unit + integration + live opt-in), eval harness do router
 
 ## O que o agente faz
 
 - Recebe perguntas sobre tráfego, pedidos e receita por canal de mídia
-- Classifica a intenção com um router determinístico antes de acionar o LLM
+- Classifica a intenção com um router LLM (structured output) que enxerga o contexto do thread, com normalização de datas determinística à parte
 - Usa tool calling real: o LLM decide *quando* chamar uma ferramenta, não executa SQL livre
 - Sustenta conversas multi-turn via `thread_id` com persistência em memória
 - Recusa perguntas fora do escopo de forma curta e educada
@@ -50,13 +53,15 @@ flowchart TD
 
 O grafo separa três responsabilidades em nodes distintos:
 
-1. **preprocess (router)** — classifica intent, normaliza datas, emite short-circuits baratos antes de gastar LLM
+1. **preprocess (router)** — guard de pergunta vazia, classifica intent via router LLM, normaliza datas de forma determinística e emite short-circuits antes de acionar o agente
 2. **agent** — LLM com `bind_tools(..., tool_choice="auto")`; decide se chama tool ou responde direto
-3. **tool_executor** — executa as tools solicitadas e injeta os resultados como `ToolMessage` no histórico
+3. **tool_executor** — executa as tools solicitadas e injeta os resultados como `ToolMessage` no histórico, voltando ao `agent` para a síntese
 
 ### Decisões de design notáveis
 
-**Router determinístico antes do LLM.** Classificação de intent, normalização de datas e guardrails são feitos por regex em `app/graph/router.py`. Isso reduz latência, elimina custo de tokens e garante comportamento consistente em perguntas estruturais (pergunta vazia, fora do escopo, datas ausentes).
+**Router LLM com normalização de datas determinística.** A classificação de intent, escopo e detecção de follow-up é feita por LLM com `with_structured_output(RouterDecision)` (`app/graph/llm_router.py`), recebendo o contexto do thread. A normalização de `start_date`/`end_date` permanece determinística (`app/graph/date_normalizer.py`), porque data é barata, exata e testável sem gastar tokens. Híbrido consciente: delega ao LLM só o que ele faz melhor (variação de linguagem natural), mantém regra onde regra ganha. Antes do router, um guard determinístico faz short-circuit de pergunta vazia sem chamar o LLM.
+
+**Eval antes de evoluir.** O router LLM é não-determinístico; mexer nele sem medir seria irresponsável. `tests/eval/` roda o router contra um dataset de casos (`router_cases.jsonl`) e reporta accuracy por campo, com baseline documentado — `poetry run pytest -m eval`.
 
 **Duas tools com limites explícitos.** `traffic_volume_analyzer` e `channel_performance_analyzer` têm descrições que especificam *quando não usar*, reduzindo confusão do modelo na escolha. Uma tool por responsabilidade é melhor que uma god-tool com parâmetro `metric`.
 
@@ -76,8 +81,9 @@ O grafo separa três responsabilidades em nodes distintos:
 |---|---|
 | `app/main.py` | Superfície HTTP, contratos de entrada/saída, `X-Debug`, tratamento de timeout do LLM |
 | `app/cli.py` | CLI conversacional via API local |
-| `app/graph/workflow.py` | StateGraph: nodes `preprocess → agent → tool_executor`, loop de tool calling |
-| `app/graph/router.py` | Intent, datas, `traffic_source`, guardrails, fusão de follow-ups |
+| `app/graph/workflow.py` | StateGraph: nodes `preprocess → agent → tool_executor`, roteamento via `Command(goto=...)`, loop de tool calling |
+| `app/graph/llm_router.py` | Router LLM: `classify_question` com `with_structured_output(RouterDecision)`, contexto do thread |
+| `app/graph/date_normalizer.py` | Normalização determinística de datas (absolutas e relativas) |
 | `app/graph/prompts.py` | Política conversacional, síntese de dados, follow-ups estratégicos e diagnósticos |
 | `app/graph/tools.py` | Registro das tools com `StructuredTool.from_function` |
 | `app/tools/*.py` | Queries SQL e mapeamento para outputs tipados |
@@ -166,7 +172,7 @@ Com `--debug`, o painel exibe `router_intent: channel_performance` e confirma a 
 Turno 1: `Qual foi a receita de Search?`  
 Turno 2: `Entre 2024-01-01 e 2024-01-31.`
 
-No segundo turno o router funde a pergunta anterior com a data recebida e executa a query completa.
+No segundo turno o router LLM, com o contexto do thread, resolve a pergunta anterior junto com a data recebida e executa a query completa.
 
 ### Recusa de métrica fora do schema
 
@@ -181,7 +187,7 @@ O agente responde com recusa curta explicando que ROAS não está disponível no
 Turno 1: `Como foi a receita dos canais entre 2024-01-01 e 2024-01-31?`  
 Turno 2: `Quais ações devemos priorizar agora?`
 
-O segundo turno não dispara nova query. O router detecta `strategy_follow_up` e o LLM usa o contexto do thread para gerar recomendações.
+O segundo turno não dispara nova query. O router LLM detecta `strategy_follow_up` a partir do contexto do thread e o agente usa o histórico para gerar recomendações.
 
 ## Modo debug
 
@@ -210,16 +216,29 @@ poetry run pytest
 
 # Smoke tests com BigQuery e LLM reais (requer ambiente configurado)
 poetry run pytest -m live
+
+# Eval do router LLM: accuracy por campo contra o dataset de casos (offline)
+poetry run pytest -m eval
 ```
 
 Variantes com output compacto para iterações rápidas: `--agent` em qualquer dos comandos acima.
+
+### Guardrails de desenvolvimento (Claude Code hooks)
+
+O repositório versiona hooks do Claude Code em `.claude/` que tornam mecânicas as invariantes do projeto durante o desenvolvimento assistido por IA:
+
+- bloqueio de leitura/edição de segredos (`.env`, `credentials/*.json`);
+- bloqueio de SQL não-parametrizada em `app/tools/` e no cliente BigQuery;
+- `ruff check` automático no arquivo Python recém-editado.
+
+Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
 
 ## Estrutura do repositório
 
 ```text
 app/
   clients/      # BigQuery client e erros de infraestrutura
-  graph/        # router, prompts, binding de tools, workflow LangGraph
+  graph/        # llm_router, date_normalizer, prompts, binding de tools, workflow LangGraph
   schemas/      # contratos Pydantic
   tools/        # queries SQL e analyzers
   cli.py        # CLI conversacional
@@ -230,11 +249,12 @@ tests/
   integration/
   live/
   readiness/
+  eval/         # eval harness do router LLM (accuracy por campo)
 scripts/
   run_local_chat.sh       # sobe API + abre CLI com --debug
   run_readiness_checks.sh
-docs/
-  workflow.md   # explicação detalhada do StateGraph
+.claude/
+  hooks/        # guardrails de desenvolvimento (segredos, SQL, ruff)
 ```
 
 ## Limitações atuais

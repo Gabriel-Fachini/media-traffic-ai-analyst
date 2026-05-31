@@ -1,15 +1,35 @@
 {
   "version": 1,
   "skills": {
+    "eval-audit": {
+      "source": "hamelsmu/evals-skills",
+      "sourceType": "github",
+      "skillPath": "skills/eval-audit/SKILL.md",
+      "computedHash": "996ef52f90673647106ac795600c6d32f82ac0e1a51564b3ea47d130c0145a45"
+    },
     "fastapi": {
       "source": "fastapi/fastapi",
       "sourceType": "github",
+      "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
       "computedHash": "ee23d5285caf055cf164ff45dd34888d381143564666baacab8aa786f22e413a"
     },
     "langgraph-fundamentals": {
       "source": "langchain-ai/langchain-skills",
       "sourceType": "github",
-      "computedHash": "d754005c69632037ca79c4daa8177b03e5a0f17f40cde3b0f532b33a8df88ded"
+      "skillPath": "config/skills/langgraph-fundamentals/SKILL.md",
+      "computedHash": "790dd42d79190a6db6a7a82ac9b03fa371402a47d91ff88c1e2731b1ceff1d29"
+    },
+    "langsmith-code-eval": {
+      "source": "langchain-ai/lca-skills",
+      "sourceType": "github",
+      "skillPath": "skills/langsmith-code-eval/SKILL.md",
+      "computedHash": "dba22649e0a3cdc9b9651d8a7fca18889e47a8b96c444ceb0a1c8391d0647be2"
+    },
+    "langsmith-fetch": {
+      "source": "langchain-ai/lca-skills",
+      "sourceType": "github",
+      "skillPath": "skills/langsmith-fetch/SKILL.md",
+      "computedHash": "5e047defc8ff2d5560cd45a0b9819ab37279bc39ef9ca653263f490636b89bd9"
     },
     "prompt-engineering-patterns": {
       "source": "wshobson/agents",
@@ -19,7 +39,8 @@
     "sql-optimization-patterns": {
       "source": "wshobson/agents",
       "sourceType": "github",
-      "computedHash": "53d0e34ed28c0cb9d9829d37e9fc9dd49bbfbbfce6f7c68f88a45c2cb34b9f60"
+      "skillPath": "plugins/developer-essentials/skills/sql-optimization-patterns/SKILL.md",
+      "computedHash": "19ff8ce86d20aa39cace441e15d23feb9b91be5fbed95526b5bd9ee3bffb6411"
     }
   }
 }

@@ -2,12 +2,19 @@
 
 ## 1. Objetivo atual
 
-Entregar um MVP funcional de um agente de analytics para Midia e Growth, capaz de:
+Projeto de portfolio: um agente de analytics para Midia e Growth que demonstra
+engenharia de agentes LLM com decisoes deliberadas, capaz de:
 
 - entender perguntas em linguagem natural sobre trafego, pedidos e receita por canal;
 - consultar dados reais do dataset `bigquery-public-data.thelook_ecommerce`;
 - responder em linguagem natural com tool calling, sem depender de um prompt monolitico;
-- sustentar uma camada de confianca com verificacoes automatizadas e smoke tests opt-in.
+- sustentar uma camada de confianca com verificacoes automatizadas, eval harness do
+  router e smoke tests opt-in.
+
+O escopo de dominio e intencionalmente estreito; o objetivo e a qualidade de
+engenharia (roteamento LLM com structured output, hibrido determinismo/LLM,
+contratos tipados, SQL parametrizada, harness de avaliacao). Roadmap em
+`PLANO_EVOLUCAO.md`.
 
 ## 2. Estado atual do produto
 
@@ -87,35 +94,48 @@ Implementacao: `app/graph/llm_router.py` — `classify_question(question, thread
 - Metricas: `total_orders` e `total_revenue`
 - Saida: `ChannelPerformanceOutput`
 
-### 4.4 Insight Synthesizer Agent
+### 4.4 Sintese (node `agent`)
 
-- sintetiza a resposta final em pt-BR a partir do resultado estruturado das tools;
-- trata follow-ups estrategicos e diagnosticos com prompts dedicados;
-- converte falhas temporarias de LLM em resposta tratada.
+- nao e um node separado; a sintese final em pt-BR e produzida pelo proprio node
+  `agent` (LLM com `bind_tools(..., tool_choice="auto")`) apos o `tool_executor`
+  injetar os `ToolMessage` no historico;
+- prompts dedicados em `app/graph/prompts.py` (`build_conversation_system_prompt`)
+  cobrem politica conversacional, sintese de dados e follow-ups estrategicos/diagnosticos;
+- falhas temporarias de LLM (`LlmTimeoutError`) sao convertidas em resposta tratada.
 
-### 4.5 Scope Guard Agent
+### 4.5 Scope Guard (short-circuits no `preprocess`)
 
-- continua responsavel por recusas curtas e educadas;
-- hoje a decisao pode vir tanto por fora de escopo quanto por dimensoes/metricas ausentes do schema.
+- nao e um node separado; recusas curtas e educadas sao emitidas como short-circuit
+  dentro do node `preprocess` (`Command(goto="__end__")` com `final_answer` pronta);
+- a decisao vem do router LLM (`needs_clarification` / `refusal_reason`): fora de
+  escopo, dimensao/metrica/canal nao suportado, datas ausentes ou invalidas, ambiguidade.
 
 ## 5. Fluxo orquestrado atual
 
-Fluxo padrao via API/CLI:
+`StateGraph` com 3 nodes e roteamento dinamico via `Command(goto=...)`
+(`app/graph/workflow.py`). Nao ha `add_conditional_edges` nem branch por intent
+para analyzers separados — as analises sao tools vinculadas ao node `agent`.
 
-1. Start
-2. Router Agent
-3. Branch:
-   - `traffic_volume` -> `traffic_volume_analyzer`
-   - `channel_performance` -> `channel_performance_analyzer`
-   - `strategy_follow_up` -> Insight Synthesizer
-   - `diagnostic_follow_up` -> Insight Synthesizer
-   - short-circuit -> mensagem pronta
-4. Quando houve consulta de dados: Insight Synthesizer
-5. Retorno para API
+Nodes e arestas:
+
+- `START -> preprocess`
+- `preprocess`:
+  - guard de pergunta vazia + router LLM (`classify_question`) + normalizacao
+    deterministica de datas (`date_normalizer`);
+  - short-circuit (`Command(goto="__end__")`) com `final_answer` pronta para
+    recusas/clarificacoes/datas invalidas;
+  - caso valido: `Command(goto="agent")`.
+- `agent` (LLM com `bind_tools(..., tool_choice="auto")`):
+  - se o LLM emitir `tool_calls`: `Command(goto="tool_executor")`;
+  - senao: resposta final em pt-BR e `Command(goto="__end__")`.
+- `tool_executor`:
+  - executa as tools solicitadas, injeta `ToolMessage` no historico;
+  - `add_edge("tool_executor", "agent")` — loopa de volta para sintese.
+- Retorno para API quando o grafo atinge `__end__`.
 
 Observacoes importantes:
 
-- o grafo usa `thread_id` para retomar contexto em memoria;
+- o grafo usa `thread_id` para retomar contexto em memoria (`MemorySaver`, cache via `lru_cache`);
 - campos overwrite-style como `final_answer` e `tools_used` sao resetados a cada turno para evitar vazamento entre checkpoints;
 - follow-ups de clarificacao podem fundir a pergunta anterior com a atual quando o contexto for valido.
 
@@ -220,8 +240,8 @@ O comando executa:
 - Manter `traffic_source` singular no contrato das tools.
 - Comparacoes entre canais devem continuar preferindo consulta agregada com sintese na camada final.
 - Nao incluir UI web nesta fase.
-- Nao incluir observability/custos como eixo principal do MVP.
-- `README.md` continua reservado para consolidacao final, salvo pedido explicito do usuario.
+- Nao incluir observability/custos como eixo principal nesta fase.
+- `README.md` e a vitrine do portfolio: mantido sincronizado com o estado real.
 
 ## 11. Definition of Done atual de `agents.md`
 
@@ -229,3 +249,16 @@ O comando executa:
 - fronteiras de escopo atuais explicitas;
 - contratos e limitacoes operacionais registradas;
 - pipeline de verificacao e estrategia de testes automatizados documentadas.
+
+## 12. Harness do Claude Code
+
+Config em `.claude/settings.json`; scripts em `.claude/hooks/` (Python, falham
+seguro: erro proprio -> exit 0, nunca travam o trabalho).
+
+### 12.1 Hooks ativos
+
+| Hook | Evento | Matcher | Acao |
+|---|---|---|---|
+| `guard_secrets.py` | `PreToolUse` | `Read\|Edit\|Write\|NotebookEdit\|Bash` | **Bloqueia** (exit 2) leitura/edicao de `.env`, `credentials/*.json`, `google.json`; pega tambem `cat`/`head`/etc no Bash. `.env.example` liberado. Protege chaves OpenAI/Anthropic e service account GCP de vazar no contexto. |
+| `guard_sql.py` | `PreToolUse` | `Edit\|Write` | **Bloqueia** (exit 2) SQL nao-parametrizada (f-string/`.format()`/`%`/concat perto de keyword SQL) em `app/tools/*.py` e `bigquery_client.py`. Torna mecanica a invariante "SQL sempre parametrizada". |
+| `post_edit_ruff.py` | `PostToolUse` | `Edit\|Write` | Roda `poetry run ruff check <arquivo>` em `.py` sob `app/`/`scripts/`/`tests/`. Erros voltam como feedback (exit 2). Pyright/compileall seguem no gate manual `verify`. |
