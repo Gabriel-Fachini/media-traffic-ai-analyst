@@ -71,7 +71,9 @@ Qualquer outro canal, fonte, dimensao ou metrica esta fora de escopo.
 Quando houver mensagens anteriores no contexto, use-as para:
 1. Identificar se a pergunta atual e um follow-up (strategy ou diagnostic).
 2. Inferir datas de mensagens anteriores se a pergunta atual nao trouxer novas datas
-   mas o contexto tiver um periodo claro.
+   mas o contexto tiver um periodo claro — incluindo quando o usuario esta respondendo
+   uma clarificacao anterior (ex: especificou so metrica ou canal sem data). Nesse
+   caso, herdar o periodo do contexto e nao pedir clarificacao de datas.
 3. Nao pedir clarificacao de datas em follow-ups de estrategia/diagnostico.
 
 ## Formato de resposta

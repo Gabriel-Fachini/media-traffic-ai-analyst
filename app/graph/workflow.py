@@ -12,6 +12,7 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     AnyMessage,
+    BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
@@ -581,19 +582,55 @@ def _apply_date_normalizer(question: str, decision: RouterDecision) -> RouterDec
     )
 
 
+def _inherit_dates_from_thread(
+    thread_context: list[BaseMessage], decision: RouterDecision
+) -> RouterDecision:
+    """Inherit temporal context from the most recent human message that had a date.
+
+    Handles two cases:
+    - Turn N had dates + metric clarification → turn N+1 resolves metric without repeating date.
+    - Turn N had dates + tool executed → turn N+1 asks about same scope without repeating date.
+    """
+    for msg in reversed(thread_context):
+        if not isinstance(msg, HumanMessage):
+            continue
+        text = msg.content if isinstance(msg.content, str) else ""
+        if not question_contains_temporal_signal(text):
+            continue
+        date_range, _ = _extract_relative_date_range(text)
+        if date_range is None:
+            continue
+        resolved_start, resolved_end = date_range
+        return RouterDecision(
+            intent=decision.intent,
+            traffic_source=decision.traffic_source,
+            start_date=resolved_start,
+            end_date=resolved_end,
+            needs_clarification=False,
+            clarification_reason=None,
+            refusal_reason=decision.refusal_reason,
+            response_message=None,
+        )
+    return decision
+
+
 def _resolve_router_turn(
     state: AnalyticsGraphState,
     question: str,
     settings: Settings | None = None,
     router_llm: Any | None = None,
 ) -> tuple[str, RouterDecision]:
+    thread_context = build_router_thread_context(list(state.get("messages", [])))
     decision = classify_question(
         question,
-        thread_context=build_router_thread_context(list(state.get("messages", []))),
+        thread_context=thread_context,
         settings=settings,
         _router_runnable=router_llm,
     )
-    return question, _apply_date_normalizer(question, decision)
+    decision = _apply_date_normalizer(question, decision)
+    if decision.needs_clarification and decision.clarification_reason == "missing_dates":
+        decision = _inherit_dates_from_thread(thread_context, decision)
+    return question, decision
 
 
 def _count_agent_iterations_in_turn(state: AnalyticsGraphState) -> int:

@@ -401,9 +401,10 @@ def test_graph_routes_contextual_comparison_follow_up_without_new_tool_execution
     assert len(graph_bundle.tools.calls) == 1
 
 
-def test_graph_treats_follow_up_with_new_channel_as_new_question(
+def test_graph_inherits_relative_date_when_follow_up_specifies_new_channel(
     graph_bundle: DeterministicGraphBundle,
 ) -> None:
+    """Date from a prior turn should carry forward when the follow-up only changes channel."""
     thread_id = "source-change-thread"
 
     invoke_analytics_graph(
@@ -418,11 +419,12 @@ def test_graph_treats_follow_up_with_new_channel_as_new_question(
     )
     router_decision = _require_router_decision(second_state)
 
-    assert _require_str(second_state, "final_answer") == MISSING_DATES_MESSAGE
-    assert _require_list(second_state, "tools_used") == []
+    # Turn 1 triggered ambiguous_analytics (no "receita"/"volume" keyword) → clarification,
+    # no tool call. Turn 2 inherits "ontem" from thread and executes the tool.
+    assert "channel_performance_analyzer" in _require_list(second_state, "tools_used")
     assert _require_str(second_state, "resolved_question") == "receita de Facebook"
     assert router_decision.normalized_params.traffic_source == "Facebook"
-    assert graph_bundle.tools.calls == []
+    assert len(graph_bundle.tools.calls) == 1
 
 
 def test_graph_treats_explicit_channel_query_after_aggregate_analysis_as_new_question(
