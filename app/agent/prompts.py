@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.schema_catalog import SCHEMA_CATALOG, SchemaCatalog, SchemaTable
+from app.core.schema_catalog import SCHEMA_CATALOG, SchemaCatalog, SchemaTable
 
 FINAL_RESPONSE_SYSTEM_PROMPT = """
 Voce recebe a pergunta original do usuario e os resultados estruturados de tools analytics.
