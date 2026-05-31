@@ -1,21 +1,28 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 import json
 from dataclasses import dataclass
+import time
 from typing import Annotated, Any
 
 import httpx
 import typer
 from pydantic import ValidationError
 from rich.console import Console, Group
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich._spinners import SPINNERS
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
 from app.schemas import DebugError, DebugInfo, ErrorResponse, QueryRequest, QueryResponse
 
-DEFAULT_API_URL = "http://127.0.0.1:8000/query"
+SPINNERS["symbols_3"] = {"frames": ["✶", "✸", "✹", "✺", "✹", "✷"], "interval": 180}
+
+DEFAULT_API_URL = "http://127.0.0.1:8000/query/stream"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 
 console = Console()
@@ -28,7 +35,10 @@ class CliSession:
 
 def _build_banner(api_url: str) -> Panel:
     header = Text("Media Traffic AI Analyst", style="bold white")
-    subtitle = Text("CLI conversacional polida via API", style="italic bright_black")
+    subtitle = Text(
+        "CLI conversacional polida via API com streaming SSE",
+        style="italic bright_black",
+    )
     endpoint = Text.assemble(
         ("Endpoint: ", "bright_black"),
         (api_url, "bold cyan"),
@@ -155,6 +165,23 @@ def _format_debug_info(debug_info: DebugInfo) -> str:
             + "\n".join(f"- {_format_debug_error(error)}" for error in debug_info.errors)
         )
 
+    if debug_info.observability:
+        observability = debug_info.observability
+        token_usage = observability.token_usage
+        tools_used = (
+            ", ".join(observability.tools_used)
+            if observability.tools_used
+            else "nenhuma"
+        )
+        blocks.append(
+            "observability:\n"
+            f"latency_ms: {observability.latency_ms if observability.latency_ms is not None else 'n/d'}\n"
+            f"llm_call_count: {observability.llm_call_count}\n"
+            f"tool_call_count: {observability.tool_call_count}\n"
+            f"tools_used: {tools_used}\n"
+            f"token_usage: input={token_usage.input_tokens} output={token_usage.output_tokens} total={token_usage.total_tokens}"
+        )
+
     return "\n\n".join(blocks) or "Nenhum detalhe adicional retornado."
 
 
@@ -218,6 +245,55 @@ def _build_response_panel(response: QueryResponse) -> Panel:
     )
 
 
+_PHASE_LABELS: dict[str, str] = {
+    "routing": "Analisando pergunta...",
+    "querying": "Consultando dados...",
+    "synthesizing": "Sintetizando resposta...",
+}
+
+
+def _build_spinner_panel(phase: str, *, active_tool: str | None = None) -> Panel:
+    label = _PHASE_LABELS.get(phase, "Analisando...")
+    if active_tool:
+        label = f"Consultando BigQuery ({active_tool})..."
+    return Panel(
+        Group(
+            Text(""),
+            Spinner("symbols_3", text=Text(f"   {label}", style="bold white"), style="dodger_blue2"),
+        ),
+        border_style="cyan",
+        padding=(1, 4),
+        title="Analista",
+    )
+
+
+def _build_stream_panel(answer_text: str) -> Panel:
+    footer = Text.assemble(
+        ("stream: ", "bright_black"),
+        ("ao vivo", "bold green"),
+    )
+    return Panel(
+        Group(Text(answer_text), Text(""), footer),
+        border_style="cyan",
+        padding=(1, 2),
+        title="Analista",
+    )
+
+
+def _animate_text(
+    live: Live,
+    text: str,
+    *,
+    panel_builder: Any | None = None,
+    chars_per_step: int = 3,
+    delay: float = 0.015,
+) -> None:
+    build: Any = panel_builder if panel_builder is not None else _build_stream_panel
+    for i in range(0, len(text), chars_per_step):
+        live.update(build(text[: i + chars_per_step]))
+        time.sleep(delay)
+
+
 def _extract_error_response(response: httpx.Response) -> tuple[str, DebugInfo | None]:
     try:
         payload = response.json()
@@ -279,7 +355,7 @@ def _handle_command(command: str, session: CliSession, api_url: str, *, debug: b
         return True
 
     if normalized == "/clear":
-        _render_startup(api_url, debug=debug)
+        _render_startup(_resolve_stream_api_url(api_url), debug=debug)
         if session.thread_id:
             console.print(
                 _build_info_panel(
@@ -308,6 +384,41 @@ def _build_request(question: str, thread_id: str | None) -> dict[str, Any]:
     return request.model_dump(exclude_none=True)
 
 
+def _resolve_stream_api_url(api_url: str) -> str:
+    normalized = api_url.rstrip("/")
+    if normalized.endswith("/query/stream"):
+        return normalized
+    if normalized.endswith("/query"):
+        return f"{normalized}/stream"
+    return normalized
+
+
+def _iter_sse_events(lines: Iterable[str]) -> Iterator[tuple[str, Any]]:
+    event_name: str | None = None
+    data_lines: list[str] = []
+
+    for raw_line in lines:
+        line = raw_line.strip("\r")
+        if not line:
+            if event_name is not None:
+                payload = json.loads("\n".join(data_lines)) if data_lines else None
+                yield event_name, payload
+            event_name = None
+            data_lines = []
+            continue
+
+        if line.startswith("event: "):
+            event_name = line.removeprefix("event: ").strip()
+            continue
+
+        if line.startswith("data: "):
+            data_lines.append(line.removeprefix("data: "))
+
+    if event_name is not None:
+        payload = json.loads("\n".join(data_lines)) if data_lines else None
+        yield event_name, payload
+
+
 def _submit_question(
     client: httpx.Client,
     *,
@@ -316,6 +427,7 @@ def _submit_question(
     question: str,
     debug: bool,
 ) -> QueryResponse | None:
+    stream_api_url = _resolve_stream_api_url(api_url)
     try:
         payload = _build_request(question, session.thread_id)
     except ValidationError as exc:
@@ -329,13 +441,126 @@ def _submit_question(
         return None
 
     try:
-        with console.status(
-            "[bold green]Consultando o analista...[/bold green]",
-            spinner="dots",
-        ):
-            headers = {"X-Debug": "true"} if debug else None
-            response = client.post(api_url, json=payload, headers=headers)
-            response.raise_for_status()
+        headers = {"X-Debug": "true"} if debug else None
+        with client.stream(
+            "POST",
+            stream_api_url,
+            json=payload,
+            headers=headers,
+        ) as response:
+            if response.is_error:
+                message, debug_info = _extract_error_response(response)
+                title = (
+                    "Falha da API"
+                    if response.status_code >= 500
+                    else f"HTTP {response.status_code}"
+                )
+                console.print(_build_error_panel(message, title=title))
+                if debug:
+                    console.print(
+                        _build_debug_panel(
+                            _build_http_debug_message(
+                                payload=payload,
+                                response=response,
+                                debug_info=debug_info,
+                            ),
+                            title="Debug HTTP",
+                        )
+                    )
+                return None
+
+            phase = "routing"
+            current_answer = ""
+            active_tool: str | None = None
+            error_response: ErrorResponse | None = None
+            final_response: QueryResponse | None = None
+
+            with Live(
+                _build_spinner_panel(phase),
+                console=console,
+                refresh_per_second=12,
+            ) as live:
+                for event_name, event_payload in _iter_sse_events(response.iter_lines()):
+                    if event_name == "metadata" and isinstance(event_payload, dict):
+                        thread_id = event_payload.get("thread_id")
+                        if isinstance(thread_id, str) and thread_id.strip():
+                            session.thread_id = thread_id.strip()
+                        continue
+
+                    if event_name == "router":
+                        live.console.print(Text("  ✓  Pergunta analisada", style="bold green"))
+                        phase = "querying"
+                        live.update(_build_spinner_panel(phase))
+                        continue
+
+                    if event_name == "tool_start" and isinstance(event_payload, dict):
+                        tool_name = event_payload.get("tool_name")
+                        active_tool = (
+                            tool_name.strip()
+                            if isinstance(tool_name, str) and tool_name.strip()
+                            else None
+                        )
+                        phase = "querying"
+                        live.update(_build_spinner_panel(phase, active_tool=active_tool))
+                        continue
+
+                    if event_name == "tool_end":
+                        if active_tool:
+                            live.console.print(Text(f"  ✓  {active_tool} chamado", style="bold green"))
+                        active_tool = None
+                        phase = "synthesizing"
+                        live.update(_build_spinner_panel(phase))
+                        continue
+
+                    if event_name == "token" and isinstance(event_payload, dict):
+                        text_delta = event_payload.get("text_delta")
+                        text = event_payload.get("text")
+                        if isinstance(text_delta, str):
+                            current_answer += text_delta
+                            phase = "streaming"
+                            live.update(_build_stream_panel(current_answer))
+                            continue
+                        if isinstance(text, str):
+                            current_answer = text
+                            phase = "streaming"
+                            live.update(_build_stream_panel(current_answer))
+                        continue
+
+                    if event_name == "final":
+                        try:
+                            final_response = QueryResponse.model_validate(event_payload)
+                        except ValidationError as exc:
+                            console.print(
+                                _build_error_panel(
+                                    "A API respondeu com um evento final fora do contrato esperado. "
+                                    f"Detalhe: {exc}",
+                                    title="Payload Invalido",
+                                )
+                            )
+                            return None
+
+                        if final_response.metadata and final_response.metadata.thread_id:
+                            session.thread_id = final_response.metadata.thread_id
+
+                        if not current_answer and final_response.answer:
+                            _animate_text(live, final_response.answer)
+
+                        live.update(_build_response_panel(final_response))
+                        continue
+
+                    if event_name == "error":
+                        try:
+                            error_response = ErrorResponse.model_validate(event_payload)
+                        except ValidationError as exc:
+                            console.print(
+                                _build_error_panel(
+                                    "A API respondeu com um evento de erro fora do contrato esperado. "
+                                    f"Detalhe: {exc}",
+                                    title="Payload Invalido",
+                                )
+                            )
+                            return None
+                        break
     except httpx.ConnectError as exc:
         console.print(
             _build_error_panel(
@@ -368,26 +593,6 @@ def _submit_question(
                 )
             )
         return None
-    except httpx.HTTPStatusError as exc:
-        message, debug_info = _extract_error_response(exc.response)
-        title = (
-            "Falha da API"
-            if exc.response.status_code >= 500
-            else f"HTTP {exc.response.status_code}"
-        )
-        console.print(_build_error_panel(message, title=title))
-        if debug:
-            console.print(
-                _build_debug_panel(
-                    _build_http_debug_message(
-                        payload=payload,
-                        response=exc.response,
-                        debug_info=debug_info,
-                    ),
-                    title="Debug HTTP",
-                )
-            )
-        return None
     except httpx.RequestError as exc:
         console.print(
             _build_error_panel(
@@ -405,35 +610,46 @@ def _submit_question(
             )
         return None
 
-    try:
-        parsed_response = QueryResponse.model_validate(response.json())
-    except ValidationError as exc:
+    if error_response is not None:
         console.print(
             _build_error_panel(
-                "A API respondeu com um payload fora do contrato esperado. "
-                f"Detalhe: {exc}",
-                title="Payload Invalido",
+                error_response.detail,
+                title="Falha da API",
+            )
+        )
+        if debug and error_response.debug is not None:
+            console.print(
+                _build_debug_panel(
+                    _format_debug_info(error_response.debug),
+                    title="Debug Execucao",
+                )
+            )
+        return None
+
+    if final_response is None:
+        console.print(
+            _build_error_panel(
+                "O stream SSE terminou sem emitir um evento final valido.",
+                title="Stream Incompleto",
             )
         )
         return None
 
-    if parsed_response.metadata and parsed_response.metadata.thread_id:
-        session.thread_id = parsed_response.metadata.thread_id
-
-    if debug and parsed_response.metadata and parsed_response.metadata.debug:
-        console.print(
-            _build_debug_panel(
-                _format_debug_info(parsed_response.metadata.debug),
-                title="Debug Execucao",
+    if debug and final_response.metadata and final_response.metadata.debug:
+        debug_text = _format_debug_info(final_response.metadata.debug)
+        with Live(console=console, refresh_per_second=12) as debug_live:
+            _animate_text(
+                debug_live,
+                debug_text,
+                panel_builder=lambda t: _build_debug_panel(t, title="Debug Execucao"),
             )
-        )
 
-    return parsed_response
+    return final_response
 
 
 def _run_chat_loop(*, api_url: str, timeout: float, debug: bool) -> None:
     session = CliSession()
-    _render_startup(api_url, debug=debug)
+    _render_startup(_resolve_stream_api_url(api_url), debug=debug)
 
     with httpx.Client(timeout=timeout) as client:
         while True:
@@ -457,15 +673,13 @@ def _run_chat_loop(*, api_url: str, timeout: float, debug: bool) -> None:
                 console.print()
                 continue
 
-            response = _submit_question(
+            _submit_question(
                 client,
                 api_url=api_url,
                 session=session,
                 question=question,
                 debug=debug,
             )
-            if response is not None:
-                console.print(_build_response_panel(response))
             console.print()
 
 
@@ -474,7 +688,7 @@ def main(
         str,
         typer.Option(
             "--api-url",
-            help="URL completa do endpoint /query usado pela CLI.",
+            help="URL completa do endpoint /query ou /query/stream usado pela CLI.",
         ),
     ] = DEFAULT_API_URL,
     timeout: Annotated[

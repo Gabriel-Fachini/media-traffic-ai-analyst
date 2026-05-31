@@ -21,8 +21,8 @@ contratos tipados, SQL parametrizada, harness de avaliacao). Roadmap em
 - Dominio: analise de trafego e receita por canal no dataset `thelook_ecommerce`.
 - Fonte de dados: tabelas `users`, `orders` e `order_items`.
 - Superficie de execucao:
-  - API FastAPI com `/health` e `/query`
-  - CLI `analyst-chat`, conversacional, consumindo a API local
+  - API FastAPI com `/health`, `/query` e `/query/stream`
+  - CLI `analyst-chat`, conversacional, consumindo o stream SSE da API local
 - Persistencia conversacional atual:
   - `thread_id` opcional no contrato HTTP
   - continuidade multi-turn em memoria via `MemorySaver`
@@ -42,7 +42,8 @@ contratos tipados, SQL parametrizada, harness de avaliacao). Roadmap em
   - follow-up diagnostico
 - Modo debug:
   - header `X-Debug`
-  - devolve `resolved_question`, `router_decision` e erros tecnicos estruturados
+  - devolve `resolved_question`, sinais do router, tool calls do agente, erros
+    tecnicos estruturados e observabilidade por turno (latencia, tokens e tools)
 
 ## 3. Requisitos de plataforma
 
@@ -234,7 +235,8 @@ O comando executa:
   - 2.2 Eval do router no LangSmith: concluido
   - 2.3 Streaming de eventos no core do graph via `astream_events`: concluido
   - 2.4 Endpoint SSE `/query/stream`: concluido
-  - 2.5-2.6: pendentes
+  - 2.5 CLI consumindo o stream SSE: concluido
+  - 2.6 `X-Debug` formalizado como camada de observabilidade: concluido
 - Fase 3 (tool de visualizacao): pendente
 - Fase 4 (persistencia SqliteSaver): pendente
 - Fase 5 (interface visual de chat): pendente

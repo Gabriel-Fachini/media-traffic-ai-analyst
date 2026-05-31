@@ -9,7 +9,7 @@ Agente conversacional de analytics para Mídia e Growth que interpreta perguntas
 - **Orquestração:** LangGraph (StateGraph com checkpointing in-memory)
 - **Roteamento:** classificação de intent por LLM com `with_structured_output(RouterDecision)`; normalização de datas determinística
 - **API:** FastAPI
-- **CLI:** `analyst-chat` — cliente conversacional que consome a API local
+- **CLI:** `analyst-chat` — cliente conversacional que consome o stream SSE da API local
 - **LLM:** OpenAI ou Anthropic (configurável por env, com fallback entre providers)
 - **Dados:** Google BigQuery via cliente oficial Python, SQL parametrizada
 - **Tipagem e contratos:** Pydantic v2, type hints, Pyright
@@ -79,8 +79,8 @@ O grafo separa três responsabilidades em nodes distintos:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `app/main.py` | Superfície HTTP, contratos de entrada/saída, `X-Debug`, tratamento de timeout do LLM |
-| `app/cli.py` | CLI conversacional via API local |
+| `app/main.py` | Superfície HTTP, contratos de entrada/saída, `/query`, `/query/stream`, `X-Debug`, tratamento de timeout do LLM |
+| `app/cli.py` | CLI conversacional via API local consumindo SSE |
 | `app/graph/workflow.py` | StateGraph: nodes `preprocess → agent → tool_executor`, roteamento via `Command(goto=...)`, loop de tool calling |
 | `app/graph/llm_router.py` | Router LLM: `classify_question` com `with_structured_output(RouterDecision)`, contexto do thread |
 | `app/graph/date_normalizer.py` | Normalização determinística de datas (absolutas e relativas) |
@@ -198,12 +198,25 @@ Qualquer request pode incluir o header `X-Debug: true`. A resposta passa a conte
   "metadata": {
     "debug": {
       "resolved_question": "...",
-      "router_decision": { "intent": "channel_performance", ... },
-      "agent_tool_calls": [...]
+      "router_intent": "channel_performance",
+      "agent_tool_calls": [...],
+      "observability": {
+        "latency_ms": 187,
+        "llm_call_count": 2,
+        "tool_call_count": 1,
+        "tools_used": ["channel_performance_analyzer"],
+        "token_usage": {
+          "input_tokens": 50,
+          "output_tokens": 32,
+          "total_tokens": 82
+        }
+      }
     }
   }
 }
 ```
+
+Com `POST /query/stream`, o mesmo modo debug aparece no evento SSE final (`event: final`), permitindo que a CLI ou um front capturem os sinais de observabilidade do turno sem depender do payload cru do LangGraph.
 
 ## Validação
 
