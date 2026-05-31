@@ -108,6 +108,58 @@ class AgentToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TokenUsage(BaseModel):
+    """Aggregated token usage observed during one analytics turn."""
+
+    input_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="Total de tokens de entrada consumidos pelas chamadas de LLM do turno.",
+    )
+    output_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="Total de tokens de saida gerados pelas chamadas de LLM do turno.",
+    )
+    total_tokens: int = Field(
+        default=0,
+        ge=0,
+        description="Soma consolidada de tokens de entrada e saida do turno.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class TurnObservability(BaseModel):
+    """Turn-level observability returned through `X-Debug`."""
+
+    latency_ms: int | None = Field(
+        default=None,
+        ge=0,
+        description="Latencia total do turno HTTP em milissegundos.",
+    )
+    llm_call_count: int = Field(
+        default=0,
+        ge=0,
+        description="Quantidade de chamadas de LLM observadas no turno atual.",
+    )
+    tool_call_count: int = Field(
+        default=0,
+        ge=0,
+        description="Quantidade de tools usadas no turno atual.",
+    )
+    tools_used: list[str] = Field(
+        default_factory=list,
+        description="Lista das tools efetivamente utilizadas no turno atual.",
+    )
+    token_usage: TokenUsage = Field(
+        default_factory=TokenUsage,
+        description="Uso agregado de tokens das chamadas de LLM do turno atual.",
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class DebugInfo(BaseModel):
     """Optional diagnostics returned when the request asks for debug details."""
 
@@ -136,6 +188,13 @@ class DebugInfo(BaseModel):
     errors: list[DebugError] = Field(
         default_factory=list,
         description="Lista de erros tecnicos capturados durante a execucao.",
+    )
+    observability: TurnObservability | None = Field(
+        default=None,
+        description=(
+            "Sinais de observabilidade do turno atual: latencia total, uso de tokens "
+            "e tools acionadas."
+        ),
     )
 
     model_config = ConfigDict(extra="forbid")

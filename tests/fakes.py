@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -51,6 +58,17 @@ def _extract_section(content: str, start: str, end: str | None = None) -> str:
     if end is not None and end in section:
         section = section.split(end, maxsplit=1)[0]
     return section.strip()
+
+
+def _fake_usage_metadata(
+    input_tokens: int,
+    output_tokens: int,
+) -> dict[str, int]:
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
 
 
 @dataclass(frozen=True)
@@ -207,7 +225,10 @@ class FakeAgentLLM:
                 question = _extract_text(message.content)
                 if question:
                     break
-        return AIMessage(content=f"FOLLOW_UP::{question}")
+        return AIMessage(
+            content=f"FOLLOW_UP::{question}",
+            usage_metadata=_fake_usage_metadata(18, 12),
+        )
 
     def _build_ambiguous_metric_clarification(self, messages: list[Any]) -> AIMessage:
         question = ""
@@ -224,7 +245,8 @@ class FakeAgentLLM:
                 f"Entendi a pergunta sobre {channel_label}, mas preciso alinhar o foco antes. "
                 "Voce quer ver volume de usuarios ou performance financeira "
                 "(receita e pedidos)?"
-            )
+            ),
+            usage_metadata=_fake_usage_metadata(16, 20),
         )
 
     def _has_tool_message(self, messages: list[Any]) -> bool:
@@ -254,7 +276,10 @@ class FakeAgentLLM:
                 if isinstance(msg, HumanMessage):
                     question = _extract_text(msg.content)
                     break
-            return AIMessage(content=f"SYNTH::{tool_name}::{question}")
+            return AIMessage(
+                content=f"SYNTH::{tool_name}::{question}",
+                usage_metadata=_fake_usage_metadata(28, 24),
+            )
 
         if self._has_follow_up_context(messages):
             return self._build_follow_up_answer(messages)
@@ -284,7 +309,41 @@ class FakeAgentLLM:
                     "type": "tool_call",
                 }
             ],
+            usage_metadata=_fake_usage_metadata(22, 8),
         )
+
+    async def astream(self, messages: list[Any]) -> Any:
+        """Yield deterministic chunks so graph streaming paths are exercised in tests."""
+        response = self.invoke(messages)
+
+        if response.tool_calls:
+            tool_call = response.tool_calls[0]
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": tool_call["name"],
+                        "args": json.dumps(tool_call["args"], ensure_ascii=False),
+                        "id": tool_call["id"],
+                        "index": 0,
+                        "type": "tool_call_chunk",
+                    }
+                ],
+                usage_metadata=response.usage_metadata,
+            )
+            return
+
+        response_text = _extract_text(response.content)
+        midpoint = max(1, len(response_text) // 2)
+        first_chunk = response_text[:midpoint]
+        second_chunk = response_text[midpoint:]
+
+        yield AIMessageChunk(content=first_chunk)
+        if second_chunk:
+            yield AIMessageChunk(
+                content=second_chunk,
+                usage_metadata=response.usage_metadata,
+            )
 
 
 @dataclass
@@ -303,7 +362,10 @@ class FakeSynthesisLLM:
                 "Pergunta de follow-up:\n",
                 "\n\nContexto analitico anterior:\n",
             )
-            return AIMessage(content=f"FOLLOW_UP::{question}")
+            return AIMessage(
+                content=f"FOLLOW_UP::{question}",
+                usage_metadata=_fake_usage_metadata(18, 12),
+            )
 
         question = _extract_section(
             prompt,
@@ -316,7 +378,10 @@ class FakeSynthesisLLM:
             tool_name = "channel_performance_analyzer"
         else:
             tool_name = "unknown"
-        return AIMessage(content=f"SYNTH::{tool_name}::{question}")
+        return AIMessage(
+            content=f"SYNTH::{tool_name}::{question}",
+            usage_metadata=_fake_usage_metadata(28, 24),
+        )
 
 
 _FAKE_UNSUPPORTED_DIMENSION_TOKENS: frozenset[str] = frozenset(

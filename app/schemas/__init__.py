@@ -8,6 +8,8 @@ from app.schemas.api import (
     QueryMetadata,
     QueryRequest,
     QueryResponse,
+    TokenUsage,
+    TurnObservability,
 )
 from app.schemas.router import RouterDecision, RouterNormalizedParams
 from app.schemas.tools import (
@@ -35,4 +37,6 @@ __all__ = [
     "DebugError",
     "DebugInfo",
     "AgentToolCall",
+    "TokenUsage",
+    "TurnObservability",
 ]

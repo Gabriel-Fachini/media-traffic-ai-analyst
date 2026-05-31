@@ -10,11 +10,14 @@ from typing import Annotated, Any, Literal, TypedDict, cast
 
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     AnyMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.messages.utils import message_chunk_to_message
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
@@ -146,6 +149,129 @@ def _build_debug_error(
         "error_type": error_type,
         "tool_name": tool_name,
     }
+
+
+async def _invoke_agent_llm(
+    llm: Any,
+    llm_input: list[AnyMessage],
+    config: RunnableConfig | None = None,
+) -> AIMessage:
+    """Return one complete AI response, streaming when the model supports it.
+
+    Streaming here solves two problems at once: the graph can surface provider
+    chunks through LangGraph's event stream, and the node still ends with a
+    normal `AIMessage` that preserves the current tool-calling loop.
+
+    `config` must be the RunnableConfig received by the node so that
+    LangGraph's astream_events callbacks are wired into the LLM call.
+    Without it, on_chat_model_stream events are never emitted and the CLI
+    receives the full response only at the end.
+    """
+    astream = getattr(llm, "astream", None)
+    if not callable(astream):
+        return cast(AIMessage, llm.invoke(llm_input))
+
+    streamed_chunk: AIMessageChunk | None = None
+    streamed_message: AIMessage | None = None
+    # Real LangChain runnables (ChatOpenAI, ChatAnthropic, RunnableBinding from
+    # bind_tools) accept config and propagate callbacks so astream_events can
+    # capture on_chat_model_stream for each token.  Test fakes (FakeAgentLLM)
+    # are plain Python classes — not Runnable — and do not accept config.
+    if isinstance(llm, Runnable) and config is not None:
+        event_stream = cast(AsyncIterator[Any], astream(llm_input, config=config))
+    else:
+        event_stream = cast(AsyncIterator[Any], astream(llm_input))
+    async for chunk in event_stream:
+        if isinstance(chunk, AIMessageChunk):
+            streamed_chunk = chunk if streamed_chunk is None else streamed_chunk + chunk
+            continue
+        if isinstance(chunk, AIMessage):
+            streamed_message = chunk
+
+    if streamed_chunk is not None:
+        return cast(AIMessage, message_chunk_to_message(streamed_chunk))
+    if streamed_message is not None:
+        return streamed_message
+
+    return cast(AIMessage, llm.invoke(llm_input))
+
+
+def _build_agent_llm_input(
+    state: AnalyticsGraphState,
+    *,
+    agent_system_prompt: str,
+) -> tuple[list[AnyMessage], list[AnyMessage]]:
+    """Assemble the LLM input and current-turn history for one agent step."""
+    current_turn_messages = _get_current_turn_messages(state)
+    resolved_question = _resolve_effective_question(state)
+    router_decision = _deserialize_router_decision(state.get("router_decision"))
+    if resolved_question:
+        rest_of_turn: list[AnyMessage] = list(current_turn_messages)
+        if rest_of_turn and isinstance(rest_of_turn[0], HumanMessage):
+            rest_of_turn = rest_of_turn[1:]
+        agent_turn_messages: list[AnyMessage] = [HumanMessage(content=resolved_question)]
+        agent_turn_messages.extend(rest_of_turn)
+    else:
+        agent_turn_messages = list(current_turn_messages)
+
+    llm_input: list[AnyMessage] = [SystemMessage(content=agent_system_prompt)]
+    router_guidance = _build_router_guidance_message(
+        router_decision,
+        resolved_question=resolved_question,
+    )
+    if router_guidance is not None:
+        llm_input.append(SystemMessage(content=router_guidance))
+    llm_input.extend(_build_follow_up_system_messages(state, router_decision))
+    llm_input.extend(agent_turn_messages)
+    return llm_input, current_turn_messages
+
+
+def _build_agent_error_command(
+    state: AnalyticsGraphState,
+    exc: Exception,
+) -> Command[Literal["tool_executor", "__end__"]]:
+    """Convert unexpected agent failures into the graph's safe final state."""
+    current_turn_messages_for_error = _get_current_turn_messages(state)
+    tools_used = _collect_tools_used(current_turn_messages_for_error)
+    return Command(
+        update={
+            "messages": [_build_temporary_failure_ai_message()],
+            "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+            "tools_used": tools_used,
+            "debug_errors": [
+                _build_debug_error(
+                    "agent",
+                    message=_stringify_exception(exc),
+                    error_type=type(exc).__name__,
+                )
+            ],
+        },
+        goto="__end__",
+    )
+
+
+def _build_agent_response_command(
+    current_turn_messages: list[AnyMessage],
+    response: AIMessage,
+) -> Command[Literal["tool_executor", "__end__"]]:
+    """Route the agent turn either to tool execution or to the final answer."""
+    if response.tool_calls:
+        return Command(
+            update={"messages": [response]},
+            goto="tool_executor",
+        )
+
+    all_turn_messages = list(current_turn_messages) + [response]
+    tools_used = _collect_tools_used(all_turn_messages)
+    final_text = _content_to_text(response.content).strip()
+    return Command(
+        update={
+            "messages": [response],
+            "final_answer": final_text,
+            "tools_used": tools_used,
+        },
+        goto="__end__",
+    )
 
 
 def _resolve_question(state: AnalyticsGraphState) -> str:
@@ -547,6 +673,52 @@ def build_analytics_graph(
     def agent_node(
         state: AnalyticsGraphState,
     ) -> Command[Literal["tool_executor", "__end__"]]:
+        """Synchronous agent path used by `invoke()` based executions."""
+        # Safety guard: prevent runaway loops.
+        iterations = _count_agent_iterations_in_turn(state)
+        if iterations >= _MAX_AGENT_ITERATIONS:
+            current_turn_messages = _get_current_turn_messages(state)
+            tools_used = _collect_tools_used(current_turn_messages)
+            return Command(
+                update={
+                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+                    "tools_used": tools_used,
+                    "debug_errors": [
+                        _build_debug_error(
+                            "agent",
+                            message=(
+                                f"Limite de {_MAX_AGENT_ITERATIONS} iteracoes atingido "
+                                "no loop agent/tool."
+                            ),
+                        )
+                    ],
+                },
+                goto="__end__",
+            )
+
+        llm_input, current_turn_messages = _build_agent_llm_input(
+            state,
+            agent_system_prompt=agent_system_prompt,
+        )
+
+        try:
+            response = cast(AIMessage, resolved_agent_llm.invoke(llm_input))
+        except Exception as exc:
+            if is_llm_timeout_error(exc):
+                raise LlmTimeoutError(
+                    "Tempo limite excedido no nó agente.",
+                    source="agent",
+                    error_type=type(exc).__name__,
+                    debug_message=_stringify_exception(exc),
+                ) from exc
+            return _build_agent_error_command(state, exc)
+
+        return _build_agent_response_command(current_turn_messages, response)
+
+    async def agent_node_async(
+        state: AnalyticsGraphState,
+        config: RunnableConfig | None = None,
+    ) -> Command[Literal["tool_executor", "__end__"]]:
         """LLM agent that decides which tool to call, then synthesizes the final answer."""
         # Safety guard: prevent runaway loops.
         iterations = _count_agent_iterations_in_turn(state)
@@ -570,37 +742,13 @@ def build_analytics_graph(
                 goto="__end__",
             )
 
-        # Build the messages for this agent invocation: system + current turn history.
-        # Always use the resolved_question (which may be a merged clarification) as the
-        # first HumanMessage so the LLM receives the full canonical context, not just
-        # the raw last user input.
-        current_turn_messages = _get_current_turn_messages(state)
-        resolved_question = _resolve_effective_question(state)
-        router_decision = _deserialize_router_decision(state.get("router_decision"))
-        if resolved_question:
-            # Replace or prepend the first HumanMessage with the resolved question.
-            non_human_prefix: list[AnyMessage] = []
-            rest_of_turn: list[AnyMessage] = list(current_turn_messages)
-            if rest_of_turn and isinstance(rest_of_turn[0], HumanMessage):
-                rest_of_turn = rest_of_turn[1:]
-            agent_turn_messages: list[AnyMessage] = (
-                [HumanMessage(content=resolved_question)] + non_human_prefix + rest_of_turn
-            )
-        else:
-            agent_turn_messages = list(current_turn_messages)
-
-        llm_input = [SystemMessage(content=agent_system_prompt)]
-        router_guidance = _build_router_guidance_message(
-            router_decision,
-            resolved_question=resolved_question,
+        llm_input, current_turn_messages = _build_agent_llm_input(
+            state,
+            agent_system_prompt=agent_system_prompt,
         )
-        if router_guidance is not None:
-            llm_input.append(SystemMessage(content=router_guidance))
-        llm_input.extend(_build_follow_up_system_messages(state, router_decision))
-        llm_input += agent_turn_messages
 
         try:
-            response = cast(AIMessage, resolved_agent_llm.invoke(llm_input))
+            response = await _invoke_agent_llm(resolved_agent_llm, llm_input, config=config)
         except Exception as exc:
             if is_llm_timeout_error(exc):
                 raise LlmTimeoutError(
@@ -609,45 +757,9 @@ def build_analytics_graph(
                     error_type=type(exc).__name__,
                     debug_message=_stringify_exception(exc),
                 ) from exc
-            current_turn_messages_for_error = _get_current_turn_messages(state)
-            tools_used = _collect_tools_used(current_turn_messages_for_error)
-            return Command(
-                update={
-                    "messages": [_build_temporary_failure_ai_message()],
-                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-                    "tools_used": tools_used,
-                    "debug_errors": [
-                        _build_debug_error(
-                            "agent",
-                            message=_stringify_exception(exc),
-                            error_type=type(exc).__name__,
-                        )
-                    ],
-                },
-                goto="__end__",
-            )
+            return _build_agent_error_command(state, exc)
 
-        # If the LLM decided to call tools, store the AIMessage and route to executor.
-        if response.tool_calls:
-            return Command(
-                update={"messages": [response]},
-                goto="tool_executor",
-            )
-
-        # No tool calls: the LLM produced the final answer directly.
-        current_turn_messages_final = _get_current_turn_messages(state)
-        # Include the new response in tool collection.
-        all_turn_messages = list(current_turn_messages_final) + [response]
-        tools_used = _collect_tools_used(all_turn_messages)
-        final_text = _content_to_text(response.content).strip()
-        return Command(
-            update={
-                "messages": [response],
-                "final_answer": final_text,
-                "tools_used": tools_used,
-            },
-            goto="__end__",
-        )
+        return _build_agent_response_command(current_turn_messages, response)
 
     def tool_executor_node(state: AnalyticsGraphState) -> dict[str, Any]:
         """Execute all tool_calls from the last AIMessage and return ToolMessages."""
@@ -712,7 +824,7 @@ def build_analytics_graph(
 
     graph = StateGraph(AnalyticsGraphState)
     graph.add_node("preprocess", preprocess_node)
-    graph.add_node("agent", agent_node)
+    graph.add_node("agent", RunnableLambda(agent_node, afunc=agent_node_async, name="agent"))
     graph.add_node("tool_executor", tool_executor_node)
 
     graph.add_edge(START, "preprocess")

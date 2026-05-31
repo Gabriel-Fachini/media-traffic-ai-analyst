@@ -4,6 +4,7 @@ import json
 from typing import Any, Iterator
 
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage, AIMessageChunk
 import pytest
 
 from app.graph.llm import LlmTimeoutError
@@ -57,6 +58,33 @@ def test_query_generates_thread_metadata_and_uses_fake_graph(
     assert body.metadata.thread_id
     assert body.metadata.thread_id_source == "generated"
     assert body.metadata.context_message_count >= 1
+
+
+def test_query_debug_includes_turn_observability(
+    client: TestClient,
+) -> None:
+    response = client.post(
+        "/query",
+        json={
+            "question": (
+                "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?"
+            )
+        },
+        headers={"X-Debug": "true"},
+    )
+    body = QueryResponse.model_validate(response.json())
+
+    assert response.status_code == 200
+    assert body.metadata is not None
+    assert body.metadata.debug is not None
+    assert body.metadata.debug.observability is not None
+    assert body.metadata.debug.observability.latency_ms is not None
+    assert body.metadata.debug.observability.llm_call_count == 2
+    assert body.metadata.debug.observability.tool_call_count == 1
+    assert body.metadata.debug.observability.tools_used == ["traffic_volume_analyzer"]
+    assert body.metadata.debug.observability.token_usage.input_tokens == 50
+    assert body.metadata.debug.observability.token_usage.output_tokens == 32
+    assert body.metadata.debug.observability.token_usage.total_tokens == 82
 
 
 def test_query_preserves_thread_id_and_context_between_turns(
@@ -159,6 +187,8 @@ def test_query_returns_structured_timeout_error_when_graph_times_out() -> None:
         "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"
     )
     assert body.debug.errors[0].error_type == "SimulatedTimeoutError"
+    assert body.debug.observability is not None
+    assert body.debug.observability.latency_ms is not None
 
 
 def test_query_returns_structured_tool_error_when_graph_tool_execution_fails() -> None:
@@ -207,6 +237,9 @@ def test_query_returns_structured_tool_error_when_graph_tool_execution_fails() -
     assert body.debug.errors[0].source == "tool_executor"
     assert body.debug.errors[0].error_type == "BigQueryClientError"
     assert body.debug.errors[0].tool_name == "channel_performance_analyzer"
+    assert body.debug.observability is not None
+    assert body.debug.observability.tool_call_count == 1
+    assert body.debug.observability.tools_used == ["channel_performance_analyzer"]
 
 
 def test_query_rejects_blank_question_with_422(client: TestClient) -> None:
@@ -271,6 +304,96 @@ def test_query_stream_emits_sse_events_for_tool_execution(
     assert final_event["metadata"]["thread_id"]
 
 
+def test_query_stream_emits_incremental_token_deltas_when_llm_streams() -> None:
+    original_overrides = dict(app.dependency_overrides)
+
+    class IncrementalStreamGraph:
+        async def astream_events(
+            self,
+            state: dict[str, Any],
+            config: dict[str, Any] | None = None,
+            *,
+            version: str,
+            **kwargs: Any,
+        ) -> Any:
+            del config, version, kwargs
+            question = state["question"]
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "ChatOpenAI",
+                "metadata": {"langgraph_node": "agent"},
+                "data": {"chunk": AIMessageChunk(content="Resposta ")},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "ChatOpenAI",
+                "metadata": {"langgraph_node": "agent"},
+                "data": {"chunk": AIMessageChunk(content="incremental")},
+            }
+            yield {
+                "event": "on_chain_end",
+                "name": "LangGraph",
+                "data": {
+                    "output": {
+                        "question": question,
+                        "final_answer": "Resposta incremental",
+                        "tools_used": [],
+                        "messages": [AIMessage(content="Resposta incremental")],
+                    }
+                },
+            }
+
+    app.dependency_overrides[get_query_graph] = lambda: IncrementalStreamGraph()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            with test_client.stream(
+                "POST",
+                "/query/stream",
+                json={"question": "Explique a resposta incremental"},
+            ) as response:
+                body = "".join(chunk for chunk in response.iter_text())
+    finally:
+        app.dependency_overrides = original_overrides
+
+    events = _parse_sse_events(body)
+    token_events = [event for event in events if event["event"] == "token"]
+
+    assert response.status_code == 200
+    assert [event["data"] for event in token_events] == [
+        {"text_delta": "Resposta "},
+        {"text_delta": "incremental"},
+    ]
+    assert events[-1]["data"]["answer"] == "Resposta incremental"
+
+
+def test_query_stream_final_event_includes_debug_observability(
+    client: TestClient,
+) -> None:
+    with client.stream(
+        "POST",
+        "/query/stream",
+        json={
+            "question": (
+                "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?"
+            )
+        },
+        headers={"X-Debug": "true"},
+    ) as response:
+        body = "".join(chunk for chunk in response.iter_text())
+
+    events = _parse_sse_events(body)
+    final_event = events[-1]["data"]
+    debug_payload = final_event["metadata"]["debug"]
+
+    assert response.status_code == 200
+    assert events[-1]["event"] == "final"
+    assert debug_payload["observability"]["latency_ms"] is not None
+    assert debug_payload["observability"]["llm_call_count"] == 2
+    assert debug_payload["observability"]["tool_call_count"] == 1
+    assert debug_payload["observability"]["tools_used"] == ["traffic_volume_analyzer"]
+    assert debug_payload["observability"]["token_usage"]["total_tokens"] == 82
+
+
 def test_query_stream_emits_error_event_when_graph_times_out() -> None:
     original_overrides = dict(app.dependency_overrides)
 
@@ -314,3 +437,4 @@ def test_query_stream_emits_error_event_when_graph_times_out() -> None:
     assert [event["event"] for event in events] == ["metadata", "error"]
     assert events[-1]["data"]["detail"] == LLM_TIMEOUT_ERROR_MESSAGE
     assert events[-1]["data"]["debug"]["errors"][0]["error_type"] == "SimulatedTimeoutError"
+    assert events[-1]["data"]["debug"]["observability"]["latency_ms"] is not None

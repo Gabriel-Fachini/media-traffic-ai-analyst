@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
 from collections.abc import AsyncIterator
+from functools import lru_cache
+from time import perf_counter
 from typing import Annotated, Any, cast
 from uuid import uuid4
 
 from fastapi import Body, Depends, FastAPI, Header
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
 from langgraph.types import Command
 from pydantic import BaseModel, ValidationError
 
@@ -32,6 +33,8 @@ from app.schemas import (
     QueryMetadata,
     QueryRequest,
     QueryResponse,
+    TokenUsage,
+    TurnObservability,
 )
 from app.schemas.router import RouterDecision
 from app.utils.config import Settings, get_settings
@@ -82,11 +85,9 @@ DebugHeader = Annotated[
 
 def _extract_agent_tool_calls(state: AnalyticsGraphState) -> list[AgentToolCall]:
     """Extract all tool_calls emitted by the LLM agent in the current state."""
-    from langchain_core.messages import AIMessage
-
     calls: list[AgentToolCall] = []
     seen: set[str] = set()
-    for message in state.get("messages", []):
+    for message in _get_current_turn_messages(state):
         if not isinstance(message, AIMessage) or not message.tool_calls:
             continue
         for tc in message.tool_calls:
@@ -103,7 +104,87 @@ def _extract_agent_tool_calls(state: AnalyticsGraphState) -> list[AgentToolCall]
     return calls
 
 
-def _build_debug_info_from_state(state: AnalyticsGraphState) -> DebugInfo | None:
+def _get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
+    """Return only the messages that belong to the current turn.
+
+    The graph persists the whole thread history, but debug and observability for
+    `X-Debug` should describe the current turn only. The workflow already marks
+    the current turn start via `turn_start_index`, so the API layer reuses it.
+    """
+    messages = state.get("messages", [])
+    if not isinstance(messages, list):
+        return []
+
+    raw_turn_start_index = state.get("turn_start_index", 0)
+    turn_start_index = (
+        raw_turn_start_index if isinstance(raw_turn_start_index, int) else 0
+    )
+    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
+    return cast(list[AnyMessage], messages[bounded_turn_start_index:])
+
+
+def _build_turn_observability(
+    *,
+    latency_ms: int | None,
+    llm_call_count: int,
+    tools_used: list[str],
+    token_usage: TokenUsage | None = None,
+) -> TurnObservability:
+    """Build the public observability summary for one turn."""
+    return TurnObservability(
+        latency_ms=latency_ms,
+        llm_call_count=llm_call_count,
+        tool_call_count=len(tools_used),
+        tools_used=tools_used,
+        token_usage=token_usage or TokenUsage(),
+    )
+
+
+def _extract_turn_observability_from_state(
+    state: AnalyticsGraphState,
+    *,
+    latency_ms: int | None,
+) -> TurnObservability:
+    """Aggregate latency, token usage, and tool usage from the current turn state."""
+    current_turn_messages = _get_current_turn_messages(state)
+    llm_call_count = 0
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+
+    for message in current_turn_messages:
+        if not isinstance(message, AIMessage):
+            continue
+        llm_call_count += 1
+        usage = message.usage_metadata or {}
+        input_tokens += int(usage.get("input_tokens", 0) or 0)
+        output_tokens += int(usage.get("output_tokens", 0) or 0)
+        total_tokens += int(usage.get("total_tokens", 0) or 0)
+
+    tools_used = state.get("tools_used", [])
+    resolved_tools_used = tools_used if isinstance(tools_used, list) else []
+    return _build_turn_observability(
+        latency_ms=latency_ms,
+        llm_call_count=llm_call_count,
+        tools_used=cast(list[str], resolved_tools_used),
+        token_usage=TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        ),
+    )
+
+
+def _elapsed_latency_ms(started_at: float) -> int:
+    """Convert a `perf_counter()` start timestamp into elapsed milliseconds."""
+    return max(0, round((perf_counter() - started_at) * 1000))
+
+
+def _build_debug_info_from_state(
+    state: AnalyticsGraphState,
+    *,
+    latency_ms: int | None = None,
+) -> DebugInfo | None:
     """Translate graph state into the optional public debug payload.
 
     The workflow stores low-level execution details in plain dictionaries and
@@ -139,13 +220,10 @@ def _build_debug_info_from_state(state: AnalyticsGraphState) -> DebugInfo | None
 
     agent_tool_calls = _extract_agent_tool_calls(state)
 
-    if (
-        not errors
-        and resolved_question is None
-        and router_intent is None
-        and not agent_tool_calls
-    ):
-        return None
+    observability = _extract_turn_observability_from_state(
+        state,
+        latency_ms=latency_ms,
+    )
 
     return DebugInfo(
         resolved_question=resolved_question,
@@ -153,12 +231,15 @@ def _build_debug_info_from_state(state: AnalyticsGraphState) -> DebugInfo | None
         router_short_circuit=router_short_circuit,
         agent_tool_calls=agent_tool_calls,
         errors=errors,
+        observability=observability,
     )
 
 
 def _build_timeout_debug_info(
     request: QueryRequest,
     exc: LlmTimeoutError,
+    *,
+    latency_ms: int | None = None,
 ) -> DebugInfo:
     """Build a debug payload for LLM timeout failures exposed by the API."""
     return DebugInfo(
@@ -170,14 +251,22 @@ def _build_timeout_debug_info(
                 error_type=exc.error_type or type(exc).__name__,
             )
         ],
+        observability=_build_turn_observability(
+            latency_ms=latency_ms,
+            llm_call_count=0,
+            tools_used=[],
+        ),
     )
 
 
 def _build_tool_execution_debug_info(
     request: QueryRequest,
     exc: ToolExecutionError,
+    *,
+    latency_ms: int | None = None,
 ) -> DebugInfo:
     """Build a debug payload for tool execution failures exposed by the API."""
+    tools_used = [exc.tool_name] if exc.tool_name else []
     return DebugInfo(
         resolved_question=exc.resolved_question or request.question,
         errors=[
@@ -188,6 +277,11 @@ def _build_tool_execution_debug_info(
                 tool_name=exc.tool_name,
             )
         ],
+        observability=_build_turn_observability(
+            latency_ms=latency_ms,
+            llm_call_count=0,
+            tools_used=tools_used,
+        ),
     )
 
 
@@ -225,6 +319,26 @@ def _format_sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
+def _message_content_to_text(content: Any) -> str:
+    """Normalize LangChain message content payloads into plain text."""
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+        return "".join(parts)
+
+    return str(content)
+
+
 def _extract_router_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any] | None:
     """Project LangGraph preprocess events into the public `router` SSE payload.
 
@@ -260,11 +374,28 @@ def _extract_router_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any] | N
 def _extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any] | None:
     """Project agent node stream events into public text chunks.
 
-    The current graph does not stream provider-native token deltas yet; instead
-    it emits agent node updates. This helper extracts the final textual content
-    of an `AIMessage` only when the streamed update is not a tool call.
+    Prefer provider/model chunk events when available because they arrive in
+    real time. The older agent-node snapshot format remains as a fallback for
+    non-streaming fakes used in tests.
     """
-    if raw_event.get("event") != "on_chain_stream" or raw_event.get("name") != "agent":
+    event_name = raw_event.get("event")
+    metadata = raw_event.get("metadata", {})
+    if isinstance(metadata, dict):
+        langgraph_node = metadata.get("langgraph_node")
+        if langgraph_node is not None and langgraph_node != "agent":
+            return None
+
+    if event_name in {"on_chat_model_stream", "on_llm_stream"}:
+        chunk = raw_event.get("data", {}).get("chunk")
+        if isinstance(chunk, AIMessageChunk):
+            if chunk.tool_call_chunks or chunk.tool_calls:
+                return None
+            text_delta = _message_content_to_text(chunk.content)
+            if text_delta.strip():
+                return {"text_delta": text_delta}
+        return None
+
+    if event_name != "on_chain_stream" or raw_event.get("name") != "agent":
         return None
 
     chunk = raw_event.get("data", {}).get("chunk")
@@ -283,7 +414,7 @@ def _extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any
     if not isinstance(last_message, AIMessage) or last_message.tool_calls:
         return None
 
-    content = str(last_message.content or "").strip()
+    content = _message_content_to_text(last_message.content).strip()
     if not content:
         return None
 
@@ -313,6 +444,7 @@ async def _stream_query_events(
     `tool_start`, `tool_end`, `token`, `final`, `error`) that clients can rely
     on without depending on LangGraph's internal event schema.
     """
+    started_at = perf_counter()
     yield _format_sse_event(
         "metadata",
         {
@@ -359,7 +491,14 @@ async def _stream_query_events(
             final_state = _extract_final_state(raw_event)
             if final_state is not None:
                 messages = final_state.get("messages", [])
-                debug_info = _build_debug_info_from_state(final_state) if debug else None
+                debug_info = (
+                    _build_debug_info_from_state(
+                        final_state,
+                        latency_ms=_elapsed_latency_ms(started_at),
+                    )
+                    if debug
+                    else None
+                )
                 metadata = _build_query_metadata(
                     thread_id=thread_id,
                     request_thread_id=request.thread_id,
@@ -375,7 +514,15 @@ async def _stream_query_events(
                     },
                 )
     except LlmTimeoutError as exc:
-        debug_info = _build_timeout_debug_info(request, exc) if debug else None
+        debug_info = (
+            _build_timeout_debug_info(
+                request,
+                exc,
+                latency_ms=_elapsed_latency_ms(started_at),
+            )
+            if debug
+            else None
+        )
         yield _format_sse_event(
             "error",
             ErrorResponse(
@@ -384,7 +531,15 @@ async def _stream_query_events(
             ).model_dump(mode="json"),
         )
     except ToolExecutionError as exc:
-        debug_info = _build_tool_execution_debug_info(request, exc) if debug else None
+        debug_info = (
+            _build_tool_execution_debug_info(
+                request,
+                exc,
+                latency_ms=_elapsed_latency_ms(started_at),
+            )
+            if debug
+            else None
+        )
         yield _format_sse_event(
             "error",
             ErrorResponse(
@@ -419,6 +574,7 @@ def query_analytics(
 ) -> QueryResponse | JSONResponse:
     """Execute one analytics turn synchronously and return the final answer."""
     thread_id = request.thread_id or str(uuid4())
+    started_at = perf_counter()
     try:
         state = invoke_analytics_graph(
             request.question,
@@ -426,14 +582,37 @@ def query_analytics(
             graph=graph,
         )
     except LlmTimeoutError as exc:
-        debug_info = _build_timeout_debug_info(request, exc) if debug else None
+        debug_info = (
+            _build_timeout_debug_info(
+                request,
+                exc,
+                latency_ms=_elapsed_latency_ms(started_at),
+            )
+            if debug
+            else None
+        )
         return _build_error_response(LLM_TIMEOUT_ERROR_MESSAGE, debug=debug_info)
     except ToolExecutionError as exc:
-        debug_info = _build_tool_execution_debug_info(request, exc) if debug else None
+        debug_info = (
+            _build_tool_execution_debug_info(
+                request,
+                exc,
+                latency_ms=_elapsed_latency_ms(started_at),
+            )
+            if debug
+            else None
+        )
         return _build_error_response(TEMPORARY_TOOL_FAILURE_MESSAGE, debug=debug_info)
 
     messages = state.get("messages", [])
-    debug_info = _build_debug_info_from_state(state) if debug else None
+    debug_info = (
+        _build_debug_info_from_state(
+            state,
+            latency_ms=_elapsed_latency_ms(started_at),
+        )
+        if debug
+        else None
+    )
 
     return QueryResponse(
         answer=state.get("final_answer", ""),
