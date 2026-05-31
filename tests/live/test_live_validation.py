@@ -10,7 +10,7 @@ import pytest
 
 from app.infra.bigquery import BigQueryClient
 from app.graph import build_tool_enabled_llm, invoke_analytics_graph
-from app.main import app
+from app.api.routes import app
 from app.schemas.api import QueryResponse
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 from app.tools import channel_performance_analyzer, traffic_volume_analyzer

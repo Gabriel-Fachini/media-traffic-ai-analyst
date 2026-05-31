@@ -24,7 +24,7 @@ dependencies = [
 
 [project.scripts]
 analyst-chat = "app.cli:entrypoint"
-verify = "app.verify:main"
+verify = "scripts.verify:main"
 
 [tool.poetry]
 packages = [{ include = "app" }]
@@ -36,7 +36,7 @@ pytest = "^9.0.3"
 langgraph-cli = {extras = ["inmem"], version = "^0.4.27"}
 
 [tool.fastapi]
-entrypoint = "app.main:app"
+entrypoint = "app.api.routes:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

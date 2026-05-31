@@ -8,8 +8,11 @@ from langchain_core.messages import AIMessage, AIMessageChunk
 import pytest
 
 from app.infra.llm import LlmTimeoutError
+from app.infra.env import get_settings
+from app.infra.config import Settings
 from app.graph.workflow import TEMPORARY_TOOL_FAILURE_MESSAGE, ToolExecutionError
-from app.main import LLM_TIMEOUT_ERROR_MESSAGE, app, get_query_graph
+from app.api.routes import app
+from app.api.deps import LLM_TIMEOUT_ERROR_MESSAGE, get_query_graph
 from app.schemas.api import ErrorResponse, QueryResponse
 from tests.fakes import DeterministicGraphBundle, build_deterministic_graph_bundle
 
@@ -26,6 +29,7 @@ def graph_bundle() -> DeterministicGraphBundle:
 def client(graph_bundle: DeterministicGraphBundle) -> Iterator[TestClient]:
     original_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_query_graph] = lambda: graph_bundle.graph
+    app.dependency_overrides[get_settings] = lambda: Settings()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides = original_overrides

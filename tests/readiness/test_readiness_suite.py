@@ -11,7 +11,10 @@ from app.graph.workflow import (
     MISSING_DATES_MESSAGE,
     invoke_analytics_graph,
 )
-from app.main import app, get_query_graph
+from app.infra.env import get_settings
+from app.infra.config import Settings
+from app.api.routes import app
+from app.api.deps import get_query_graph
 from app.schemas.api import QueryResponse
 from app.tools.channel_performance_analyzer import CHANNEL_PERFORMANCE_SQL
 from app.tools.traffic_volume_analyzer import TRAFFIC_VOLUME_SQL
@@ -29,6 +32,7 @@ def graph_bundle() -> DeterministicGraphBundle:
 def client(graph_bundle: DeterministicGraphBundle) -> Iterator[TestClient]:
     original_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_query_graph] = lambda: graph_bundle.graph
+    app.dependency_overrides[get_settings] = lambda: Settings()
     with TestClient(app, raise_server_exceptions=False) as test_client:
         yield test_client
     app.dependency_overrides = original_overrides
