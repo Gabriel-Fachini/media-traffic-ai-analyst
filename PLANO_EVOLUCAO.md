@@ -142,8 +142,8 @@ Developer plan: 1 dev, 5k traces/mes, gratis. Suficiente para projeto pessoal.
       `tests/unit/test_router.py` removidos (testavam codigo morto de producao);
       `FakeRouterRunnable` reescrito sobre `date_normalizer` + construcao direta
       de `RouterDecision`.
-- [ ] 2.3 Streaming no graph: expor `astream_events` do LangGraph.
-- [ ] 2.4 Endpoint SSE em `app/main.py` (ex: `POST /query/stream`) emitindo
+- [x] 2.3 Streaming no graph: expor `astream_events` do LangGraph.
+- [x] 2.4 Endpoint SSE em `app/main.py` (ex: `POST /query/stream`) emitindo
       tokens + eventos de tool call. Manter `/query` sincrono para compatibilidade.
 - [ ] 2.5 CLI (`app/cli.py`) consumindo o stream: render incremental + indicacao
       de tool em execucao.

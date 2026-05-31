@@ -229,7 +229,12 @@ O comando executa:
 - Fase 1 (router LLM): concluida — `app/graph/llm_router.py` (classify_question),
   `app/graph/date_normalizer.py` (datas deterministicas), `app/graph/router.py`
   deletado, router deterministico movido para `tests/deterministic_router.py`.
-- Fase 2 (observabilidade + streaming): pendente
+- Fase 2 (observabilidade + streaming): em andamento
+  - 2.1 LangSmith opt-in: concluido
+  - 2.2 Eval do router no LangSmith: concluido
+  - 2.3 Streaming de eventos no core do graph via `astream_events`: concluido
+  - 2.4 Endpoint SSE `/query/stream`: concluido
+  - 2.5-2.6: pendentes
 - Fase 3 (tool de visualizacao): pendente
 - Fase 4 (persistencia SqliteSaver): pendente
 - Fase 5 (interface visual de chat): pendente

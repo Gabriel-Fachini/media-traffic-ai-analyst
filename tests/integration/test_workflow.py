@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import uuid4
@@ -15,6 +16,7 @@ from app.graph.workflow import (
     MISSING_DATES_MESSAGE,
     TEMPORARY_TOOL_FAILURE_MESSAGE,
     ToolExecutionError,
+    astream_analytics_graph_events,
     UNSUPPORTED_DIMENSION_MESSAGE,
     build_analytics_graph,
     invoke_analytics_graph,
@@ -82,6 +84,32 @@ def test_graph_llm_decides_to_call_traffic_volume_tool(
     assert graph_bundle.tools.calls[0].tool_name == "traffic_volume_analyzer"
     # The agent LLM was invoked (first for tool_calls, then for synthesis).
     assert len(graph_bundle.agent_llm.prompts) >= 1
+
+
+def test_graph_exposes_langgraph_astream_events(
+    graph_bundle: DeterministicGraphBundle,
+) -> None:
+    async def collect_events() -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        async for event in astream_analytics_graph_events(
+            "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?",
+            graph=graph_bundle.graph,
+            thread_id="stream-thread",
+            version="v2",
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(collect_events())
+
+    event_names = [str(event.get("event")) for event in events]
+    assert "on_chain_start" in event_names
+    assert "on_chain_end" in event_names
+    assert any(event.get("name") == "preprocess" for event in events)
+    assert any(event.get("name") == "agent" for event in events)
+    assert any(event.get("name") == "tool_executor" for event in events)
+    assert any(event.get("event") == "on_tool_start" for event in events)
+    assert any(event.get("event") == "on_tool_end" for event in events)
 
 
 def test_graph_routes_aggregate_user_volume_query_without_channel(

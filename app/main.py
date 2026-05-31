@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Annotated
+from collections.abc import AsyncIterator
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
 from fastapi import Body, Depends, FastAPI, Header
-from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, StreamingResponse
+from langchain_core.messages import AIMessage
+from langgraph.types import Command
 from pydantic import BaseModel, ValidationError
 
-from app.graph import AnalyticsGraphState, invoke_analytics_graph
+from app.graph import (
+    AnalyticsGraphState,
+    astream_analytics_graph_events,
+    invoke_analytics_graph,
+)
 from app.graph.llm import LlmTimeoutError
 from app.graph.workflow import (
     TEMPORARY_TOOL_FAILURE_MESSAGE,
@@ -52,6 +61,12 @@ class HealthResponse(BaseModel):
 
 @lru_cache
 def get_query_graph() -> object:
+    """Return the cached analytics graph used by HTTP request handlers.
+
+    The API layer depends on a persistent graph instance so repeated requests
+    that reuse the same `thread_id` can recover conversation context from the
+    checkpointer.
+    """
     return get_persistent_analytics_graph()
 
 
@@ -89,6 +104,13 @@ def _extract_agent_tool_calls(state: AnalyticsGraphState) -> list[AgentToolCall]
 
 
 def _build_debug_info_from_state(state: AnalyticsGraphState) -> DebugInfo | None:
+    """Translate graph state into the optional public debug payload.
+
+    The workflow stores low-level execution details in plain dictionaries and
+    messages. This helper extracts only the diagnostics that are safe and useful
+    for API consumers: resolved question, router signals, tool calls, and
+    structured technical errors.
+    """
     raw_errors = state.get("debug_errors", [])
     errors: list[DebugError] = []
 
@@ -138,6 +160,7 @@ def _build_timeout_debug_info(
     request: QueryRequest,
     exc: LlmTimeoutError,
 ) -> DebugInfo:
+    """Build a debug payload for LLM timeout failures exposed by the API."""
     return DebugInfo(
         resolved_question=request.question,
         errors=[
@@ -154,6 +177,7 @@ def _build_tool_execution_debug_info(
     request: QueryRequest,
     exc: ToolExecutionError,
 ) -> DebugInfo:
+    """Build a debug payload for tool execution failures exposed by the API."""
     return DebugInfo(
         resolved_question=exc.resolved_question or request.question,
         errors=[
@@ -172,14 +196,207 @@ def _build_error_response(
     *,
     debug: DebugInfo | None = None,
 ) -> JSONResponse:
+    """Return the standardized HTTP 500 payload used by `/query`."""
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(detail=detail, debug=debug).model_dump(mode="json"),
     )
 
 
+def _build_query_metadata(
+    *,
+    thread_id: str,
+    request_thread_id: str | None,
+    context_message_count: int,
+    debug_info: DebugInfo | None = None,
+) -> QueryMetadata:
+    """Assemble the shared metadata contract returned by sync and SSE endpoints."""
+    return QueryMetadata(
+        thread_id=thread_id,
+        thread_id_source="provided" if request_thread_id else "generated",
+        context_message_count=context_message_count,
+        debug=debug_info,
+    )
+
+
+def _format_sse_event(event: str, data: dict[str, Any]) -> str:
+    """Serialize one SSE event block using the `event:` + `data:` wire format."""
+    payload = json.dumps(jsonable_encoder(data), ensure_ascii=False)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _extract_router_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any] | None:
+    """Project LangGraph preprocess events into the public `router` SSE payload.
+
+    Only preprocess `on_chain_stream` events contain the router `Command` update
+    with the normalized question and structured router decision for the current
+    turn. All other raw events are ignored here.
+    """
+    if raw_event.get("event") != "on_chain_stream" or raw_event.get("name") != "preprocess":
+        return None
+
+    chunk = raw_event.get("data", {}).get("chunk")
+    if not isinstance(chunk, Command):
+        return None
+
+    update = getattr(chunk, "update", None)
+    if not isinstance(update, dict):
+        return None
+
+    router_decision = update.get("router_decision")
+    if not isinstance(router_decision, dict):
+        return None
+
+    payload: dict[str, Any] = {
+        "intent": router_decision.get("intent"),
+        "resolved_question": update.get("resolved_question"),
+        "needs_clarification": router_decision.get("needs_clarification", False),
+        "clarification_reason": router_decision.get("clarification_reason"),
+        "refusal_reason": router_decision.get("refusal_reason"),
+    }
+    return payload
+
+
+def _extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any] | None:
+    """Project agent node stream events into public text chunks.
+
+    The current graph does not stream provider-native token deltas yet; instead
+    it emits agent node updates. This helper extracts the final textual content
+    of an `AIMessage` only when the streamed update is not a tool call.
+    """
+    if raw_event.get("event") != "on_chain_stream" or raw_event.get("name") != "agent":
+        return None
+
+    chunk = raw_event.get("data", {}).get("chunk")
+    if not isinstance(chunk, Command):
+        return None
+
+    update = getattr(chunk, "update", None)
+    if not isinstance(update, dict):
+        return None
+
+    messages = update.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+
+    last_message = messages[-1]
+    if not isinstance(last_message, AIMessage) or last_message.tool_calls:
+        return None
+
+    content = str(last_message.content or "").strip()
+    if not content:
+        return None
+
+    return {"text": content}
+
+
+def _extract_final_state(raw_event: dict[str, Any]) -> AnalyticsGraphState | None:
+    """Return the final graph state once the top-level LangGraph run finishes."""
+    if raw_event.get("event") != "on_chain_end" or raw_event.get("name") != "LangGraph":
+        return None
+
+    output = raw_event.get("data", {}).get("output")
+    return cast(AnalyticsGraphState, output) if isinstance(output, dict) else None
+
+
+async def _stream_query_events(
+    request: QueryRequest,
+    graph: object,
+    *,
+    thread_id: str,
+    debug: bool,
+) -> AsyncIterator[str]:
+    """Adapt internal LangGraph events into the public SSE protocol.
+
+    The raw framework events are intentionally not exposed directly. This
+    adapter emits a stable sequence of API-level events (`metadata`, `router`,
+    `tool_start`, `tool_end`, `token`, `final`, `error`) that clients can rely
+    on without depending on LangGraph's internal event schema.
+    """
+    yield _format_sse_event(
+        "metadata",
+        {
+            "thread_id": thread_id,
+            "thread_id_source": "provided" if request.thread_id else "generated",
+        },
+    )
+
+    try:
+        async for raw_event in astream_analytics_graph_events(
+            request.question,
+            thread_id=thread_id,
+            graph=graph,
+            version="v2",
+        ):
+            router_payload = _extract_router_sse_payload(raw_event)
+            if router_payload is not None:
+                yield _format_sse_event("router", router_payload)
+
+            if raw_event.get("event") == "on_tool_start":
+                yield _format_sse_event(
+                    "tool_start",
+                    {
+                        "tool_name": raw_event.get("name"),
+                        "args": raw_event.get("data", {}).get("input", {}),
+                    },
+                )
+                continue
+
+            if raw_event.get("event") == "on_tool_end":
+                yield _format_sse_event(
+                    "tool_end",
+                    {
+                        "tool_name": raw_event.get("name"),
+                        "output": raw_event.get("data", {}).get("output"),
+                    },
+                )
+                continue
+
+            token_payload = _extract_agent_token_sse_payload(raw_event)
+            if token_payload is not None:
+                yield _format_sse_event("token", token_payload)
+
+            final_state = _extract_final_state(raw_event)
+            if final_state is not None:
+                messages = final_state.get("messages", [])
+                debug_info = _build_debug_info_from_state(final_state) if debug else None
+                metadata = _build_query_metadata(
+                    thread_id=thread_id,
+                    request_thread_id=request.thread_id,
+                    context_message_count=len(messages),
+                    debug_info=debug_info,
+                )
+                yield _format_sse_event(
+                    "final",
+                    {
+                        "answer": final_state.get("final_answer", ""),
+                        "tools_used": final_state.get("tools_used", []),
+                        "metadata": metadata.model_dump(mode="json"),
+                    },
+                )
+    except LlmTimeoutError as exc:
+        debug_info = _build_timeout_debug_info(request, exc) if debug else None
+        yield _format_sse_event(
+            "error",
+            ErrorResponse(
+                detail=LLM_TIMEOUT_ERROR_MESSAGE,
+                debug=debug_info,
+            ).model_dump(mode="json"),
+        )
+    except ToolExecutionError as exc:
+        debug_info = _build_tool_execution_debug_info(request, exc) if debug else None
+        yield _format_sse_event(
+            "error",
+            ErrorResponse(
+                detail=TEMPORARY_TOOL_FAILURE_MESSAGE,
+                debug=debug_info,
+            ).model_dump(mode="json"),
+        )
+
+
 @app.get("/health", response_model=HealthResponse, tags=["health"])
 def health_check(settings: SettingsDep) -> HealthResponse:
+    """Return a lightweight readiness payload for the local API process."""
     return HealthResponse(status="ok", environment=settings.app_env)
 
 
@@ -200,6 +417,7 @@ def query_analytics(
     graph: AnalyticsGraphDep,
     debug: DebugHeader = False,
 ) -> QueryResponse | JSONResponse:
+    """Execute one analytics turn synchronously and return the final answer."""
     thread_id = request.thread_id or str(uuid4())
     try:
         state = invoke_analytics_graph(
@@ -220,10 +438,38 @@ def query_analytics(
     return QueryResponse(
         answer=state.get("final_answer", ""),
         tools_used=state.get("tools_used", []),
-        metadata=QueryMetadata(
+        metadata=_build_query_metadata(
             thread_id=thread_id,
-            thread_id_source="provided" if request.thread_id else "generated",
+            request_thread_id=request.thread_id,
             context_message_count=len(messages),
-            debug=debug_info,
+            debug_info=debug_info,
         ),
+    )
+
+
+@app.post(
+    "/query/stream",
+    tags=["query"],
+    summary="Recebe uma pergunta de analytics e retorna um stream SSE do agente",
+)
+async def query_analytics_stream(
+    request: QueryRequestBody,
+    graph: AnalyticsGraphDep,
+    debug: DebugHeader = False,
+) -> StreamingResponse:
+    """Execute one analytics turn and expose its progress as SSE events."""
+    thread_id = request.thread_id or str(uuid4())
+    return StreamingResponse(
+        _stream_query_events(
+            request,
+            graph,
+            thread_id=thread_id,
+            debug=debug,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )

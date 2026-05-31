@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from functools import lru_cache
+import inspect
 import json
 import re
 import unicodedata
@@ -734,6 +736,36 @@ def invoke_analytics_graph(
     thread_id: str | None = None,
     graph: Any | None = None,
 ) -> AnalyticsGraphState:
+    """Execute one analytics turn synchronously and return the final graph state.
+
+    This is the compatibility entrypoint used by the current `/query` endpoint.
+    It reuses `_prepare_graph_run()` so the sync path and the streaming path
+    build the exact same graph input and configurable thread context.
+    """
+    resolved_graph, input_state, config = _prepare_graph_run(
+        question,
+        settings=settings,
+        thread_id=thread_id,
+        graph=graph,
+    )
+
+    return cast(AnalyticsGraphState, resolved_graph.invoke(input_state, config=config))
+
+
+def _prepare_graph_run(
+    question: str,
+    settings: Settings | None = None,
+    *,
+    thread_id: str | None = None,
+    graph: Any | None = None,
+) -> tuple[Any, AnalyticsGraphState, dict[str, Any] | None]:
+    """Build the common execution artifacts for one graph turn.
+
+    Returns the resolved graph instance, the per-turn input state, and the
+    optional LangGraph configurable context used for checkpoint/thread
+    continuity. Centralizing this logic keeps `invoke()` and
+    `astream_events()` behavior aligned.
+    """
     resolved_graph = graph
     if resolved_graph is None:
         resolved_graph = (
@@ -754,7 +786,41 @@ def invoke_analytics_graph(
         "tools_used": [],
     }
 
-    return cast(AnalyticsGraphState, resolved_graph.invoke(input_state, config=config))
+    return resolved_graph, input_state, config
+
+
+async def astream_analytics_graph_events(
+    question: str,
+    settings: Settings | None = None,
+    *,
+    thread_id: str | None = None,
+    graph: Any | None = None,
+    version: Literal["v1", "v2", "v3"] = "v3",
+    **kwargs: Any,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream LangGraph execution events for a single analytics turn.
+
+    This keeps the exact same input/config preparation used by the synchronous
+    invoke path, but delegates execution to LangGraph's `astream_events`.
+    """
+    resolved_graph, input_state, config = _prepare_graph_run(
+        question,
+        settings=settings,
+        thread_id=thread_id,
+        graph=graph,
+    )
+
+    event_stream = resolved_graph.astream_events(
+        input_state,
+        config=config,
+        version=version,
+        **kwargs,
+    )
+    if inspect.isawaitable(event_stream):
+        event_stream = await event_stream
+
+    async for event in event_stream:
+        yield cast(dict[str, Any], event)
 
 
 __all__ = [
@@ -768,5 +834,6 @@ __all__ = [
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "build_analytics_graph",
     "get_persistent_analytics_graph",
+    "astream_analytics_graph_events",
     "invoke_analytics_graph",
 ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Iterator
 
 from fastapi.testclient import TestClient
@@ -212,3 +213,104 @@ def test_query_rejects_blank_question_with_422(client: TestClient) -> None:
     response = client.post("/query", json={"question": "   "})
 
     assert response.status_code == 422
+
+
+def _parse_sse_events(raw_body: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    for block in raw_body.strip().split("\n\n"):
+        if not block.strip():
+            continue
+
+        event_name: str | None = None
+        data_lines: list[str] = []
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event_name = line.removeprefix("event: ").strip()
+            elif line.startswith("data: "):
+                data_lines.append(line.removeprefix("data: "))
+
+        if event_name is None:
+            continue
+
+        payload = json.loads("\n".join(data_lines)) if data_lines else None
+        events.append({"event": event_name, "data": payload})
+
+    return events
+
+
+def test_query_stream_emits_sse_events_for_tool_execution(
+    client: TestClient,
+) -> None:
+    with client.stream(
+        "POST",
+        "/query/stream",
+        json={
+            "question": (
+                "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?"
+            )
+        },
+    ) as response:
+        body = "".join(chunk for chunk in response.iter_text())
+
+    events = _parse_sse_events(body)
+    event_names = [event["event"] for event in events]
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert event_names[0] == "metadata"
+    assert "router" in event_names
+    assert "tool_start" in event_names
+    assert "tool_end" in event_names
+    assert "token" in event_names
+    assert event_names[-1] == "final"
+
+    final_event = events[-1]["data"]
+    assert final_event["answer"].startswith("SYNTH::traffic_volume_analyzer::")
+    assert "traffic_volume_analyzer" in final_event["tools_used"]
+    assert final_event["metadata"]["thread_id"]
+
+
+def test_query_stream_emits_error_event_when_graph_times_out() -> None:
+    original_overrides = dict(app.dependency_overrides)
+
+    class TimeoutStreamGraph:
+        async def astream_events(
+            self,
+            state: dict[str, Any],
+            config: dict[str, Any] | None = None,
+            *,
+            version: str,
+            **kwargs: Any,
+        ) -> Any:
+            del state, config, version, kwargs
+            raise LlmTimeoutError(
+                "simulated timeout",
+                error_type="SimulatedTimeoutError",
+                debug_message="simulated timeout",
+            )
+            yield  # pragma: no cover
+
+    app.dependency_overrides[get_query_graph] = lambda: TimeoutStreamGraph()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            with test_client.stream(
+                "POST",
+                "/query/stream",
+                json={
+                    "question": (
+                        "Qual foi a receita de Search entre 2024-01-01 e 2024-01-31?"
+                    )
+                },
+                headers={"X-Debug": "true"},
+            ) as response:
+                body = "".join(chunk for chunk in response.iter_text())
+    finally:
+        app.dependency_overrides = original_overrides
+
+    events = _parse_sse_events(body)
+
+    assert response.status_code == 200
+    assert [event["event"] for event in events] == ["metadata", "error"]
+    assert events[-1]["data"]["detail"] == LLM_TIMEOUT_ERROR_MESSAGE
+    assert events[-1]["data"]["debug"]["errors"][0]["error_type"] == "SimulatedTimeoutError"
