@@ -27,9 +27,9 @@ contratos tipados, SQL parametrizada, harness de avaliacao). Roadmap em
   - `thread_id` opcional no contrato HTTP
   - continuidade multi-turn em memoria via `MemorySaver`
   - nao ha persistencia duravel entre reinicios do processo
-- Roteamento: LLM-based via `classify_question` em `app/graph/llm_router.py`
+- Roteamento: LLM-based via `classify_question` em `app/core/router/classifier.py`
   com `with_structured_output(RouterDecision)`; normalizacao de datas permanece
-  deterministica em `app/graph/date_normalizer.py`
+  deterministica em `app/core/dates.py`
 - Formatos temporais suportados na normalizacao de datas:
   - `YYYY-MM-DD`
   - `DD/MM/AAAA`
@@ -58,15 +58,59 @@ contratos tipados, SQL parametrizada, harness de avaliacao). Roadmap em
   - suporte atual a OpenAI e Anthropic
   - fallback opcional entre providers/modelos
 
-## 4. Arquitetura atual de agentes
+## 4. Arquitetura de camadas
+
+O codigo segue uma arquitetura em camadas com dependencias unidirecionais:
+
+```
+api/ cli/  →  agent/  →  core/
+               ↑
+             infra/  (injetado nas bordas, nunca importado por core/)
+```
+
+- `app/core/` — logica pura de dominio (sem LangChain, sem FastAPI, sem rede)
+  - `core/dates.py` — normalizacao deterministica de datas
+  - `core/router/decision.py` — RouterDecision e tipos relacionados
+  - `core/router/classifier.py` — classify_question (LLM router)
+  - `core/router/date_resolution.py` — apply_date_normalizer, inherit_dates_from_thread
+  - `core/analytics/models.py` — contratos das tools (TrafficVolumeInput/Output, etc.)
+  - `core/analytics/queries.py` — SQL constants (DATASET_ID f-strings permitidos aqui)
+  - `core/analytics/traffic_volume.py` — traffic_volume_analyzer (funcao pura)
+  - `core/analytics/channel_performance.py` — channel_performance_analyzer (funcao pura)
+  - `core/schema_catalog.py` — DATASET_ID, SCHEMA_CATALOG
+- `app/infra/` — adaptadores externos (BigQuery, LLM providers, Settings)
+  - `infra/config.py` — Settings (pydantic-settings), SupportedLlmProvider
+  - `infra/env.py` — get_settings, apply_runtime_environment
+  - `infra/bigquery.py` — BigQueryClient, BigQueryClientError
+  - `infra/llm.py` — build_analytics_llm, build_tool_enabled_llm, LlmTimeoutError
+- `app/agent/` — orquestracao LangGraph
+  - `agent/state.py` — AnalyticsGraphState, ToolExecutionError
+  - `agent/messages.py` — helpers de mensagens, constantes de resposta
+  - `agent/nodes.py` — factory functions dos nodes do grafo
+  - `agent/graph.py` — build_analytics_graph, get_persistent_analytics_graph, invoke/astream
+  - `agent/prompts.py` — build_conversation_system_prompt
+- `app/api/` — camada HTTP (FastAPI)
+  - `api/schemas.py` — contratos HTTP (QueryRequest, QueryResponse, etc.)
+  - `api/deps.py` — dependencias FastAPI (SettingsDep, AnalyticsGraphDep, etc.)
+  - `api/observability.py` — debug helpers (build_debug_info_from_state, etc.)
+  - `api/sse.py` — adaptador SSE (format_sse_event, stream_query_events, etc.)
+  - `api/routes.py` — FastAPI app + 3 route handlers
+- `app/cli/` — interface de linha de comando (Typer)
+  - `cli/rendering.py` — helpers Rich (paineis, spinner, formatacao)
+  - `cli/sse_client.py` — cliente HTTP SSE
+  - `cli/app.py` — Typer app, chat loop, entrypoint
+- Shims de backward-compat em `app/graph/`, `app/schemas/`, `app/tools/`, `app/main.py`
+  re-exportam dos canonicos acima para nao quebrar importacoes existentes.
+
+## 5. Arquitetura atual de agentes (nodes e tools)
 
 ### 4.1 Router Agent
 
-Implementacao: `app/graph/llm_router.py` — `classify_question(question, thread_context, settings) -> RouterDecision`
+Implementacao: `app/core/router/classifier.py` — `classify_question(question, thread_context, settings) -> RouterDecision`
 
 - Classificacao via LLM com `with_structured_output(RouterDecision)`.
 - Contexto do thread (ultimas 6 mensagens nao-system) passado para deteccao de follow-up.
-- Normalizacao de `start_date` e `end_date` permanece deterministica (`app/graph/date_normalizer.py`).
+- Normalizacao de `start_date` e `end_date` permanece deterministica (`app/core/dates.py`).
 - Classificacao de intent:
   - `traffic_volume`
   - `channel_performance`
@@ -100,7 +144,7 @@ Implementacao: `app/graph/llm_router.py` — `classify_question(question, thread
 - nao e um node separado; a sintese final em pt-BR e produzida pelo proprio node
   `agent` (LLM com `bind_tools(..., tool_choice="auto")`) apos o `tool_executor`
   injetar os `ToolMessage` no historico;
-- prompts dedicados em `app/graph/prompts.py` (`build_conversation_system_prompt`)
+- prompts dedicados em `app/agent/prompts.py` (`build_conversation_system_prompt`)
   cobrem politica conversacional, sintese de dados e follow-ups estrategicos/diagnosticos;
 - falhas temporarias de LLM (`LlmTimeoutError`) sao convertidas em resposta tratada.
 
@@ -111,10 +155,10 @@ Implementacao: `app/graph/llm_router.py` — `classify_question(question, thread
 - a decisao vem do router LLM (`needs_clarification` / `refusal_reason`): fora de
   escopo, dimensao/metrica/canal nao suportado, datas ausentes ou invalidas, ambiguidade.
 
-## 5. Fluxo orquestrado atual
+## 6. Fluxo orquestrado atual
 
 `StateGraph` com 3 nodes e roteamento dinamico via `Command(goto=...)`
-(`app/graph/workflow.py`). Nao ha `add_conditional_edges` nem branch por intent
+(`app/agent/graph.py`). Nao ha `add_conditional_edges` nem branch por intent
 para analyzers separados — as analises sao tools vinculadas ao node `agent`.
 
 Nodes e arestas:
@@ -140,7 +184,7 @@ Observacoes importantes:
 - campos overwrite-style como `final_answer` e `tools_used` sao resetados a cada turno para evitar vazamento entre checkpoints;
 - follow-ups de clarificacao podem fundir a pergunta anterior com a atual quando o contexto for valido.
 
-## 6. Contratos de dados atuais
+## 7. Contratos de dados atuais
 
 ### 6.1 Input das tools
 
@@ -168,7 +212,7 @@ Observacoes importantes:
   - `context_message_count: int`
   - `debug: DebugInfo | None`
 
-## 7. Politica de seguranca e confiabilidade
+## 8. Politica de seguranca e confiabilidade
 
 - SQL sempre parametrizada; nao concatenar input de usuario na query.
 - Falhas de BigQuery sao encapsuladas em `BigQueryClientError`.
@@ -176,7 +220,7 @@ Observacoes importantes:
 - O modo debug nao expoe stack trace bruto; retorna apenas diagnostico resumido.
 - Persistencia atual e apenas em RAM. Reiniciar o processo elimina o contexto multi-turn.
 
-## 8. Pipeline de validacao atual
+## 9. Pipeline de validacao atual
 
 ### 8.1 Gate sem testes
 
@@ -223,13 +267,14 @@ O comando executa:
   - tool binding do LLM
   - graph/API end-to-end com ambiente configurado
 
-## 9. Mapeamento com as fases (PLANO_EVOLUCAO.md)
+## 10. Mapeamento com as fases (PLANO_EVOLUCAO.md)
 
 - Fase 0 (eval harness): concluida — `tests/eval/` com `router_cases.jsonl`,
   `test_router_eval.py` (marker `eval`), baseline documentado.
-- Fase 1 (router LLM): concluida — `app/graph/llm_router.py` (classify_question),
-  `app/graph/date_normalizer.py` (datas deterministicas), `app/graph/router.py`
-  deletado, router deterministico movido para `tests/deterministic_router.py`.
+- Fase 1 (router LLM): concluida — `app/core/router/classifier.py` (classify_question),
+  `app/core/dates.py` (datas deterministicas), router deterministico movido para
+  `tests/deterministic_router.py`. Shims em `app/graph/llm_router.py` e
+  `app/graph/date_normalizer.py` preservam backward-compat.
 - Fase 2 (observabilidade + streaming): em andamento
   - 2.1 LangSmith opt-in: concluido
   - 2.2 Eval do router no LangSmith: concluido
@@ -241,7 +286,7 @@ O comando executa:
 - Fase 4 (persistencia SqliteSaver): pendente
 - Fase 5 (interface visual de chat): pendente
 
-## 10. Diretrizes de escopo atuais
+## 11. Diretrizes de escopo atuais
 
 - Priorizar implementacao simples e incremental.
 - Manter `traffic_source` singular no contrato das tools.
@@ -250,14 +295,14 @@ O comando executa:
 - Nao incluir observability/custos como eixo principal nesta fase.
 - `README.md` e a vitrine do portfolio: mantido sincronizado com o estado real.
 
-## 11. Definition of Done atual de `agents.md`
+## 12. Definition of Done atual de `agents.md`
 
 - estado real do projeto documentado;
 - fronteiras de escopo atuais explicitas;
 - contratos e limitacoes operacionais registradas;
 - pipeline de verificacao e estrategia de testes automatizados documentadas.
 
-## 12. Harness do Claude Code
+## 13. Harness do Claude Code
 
 Config em `.claude/settings.json`; scripts em `.claude/hooks/` (Python, falham
 seguro: erro proprio -> exit 0, nunca travam o trabalho).
