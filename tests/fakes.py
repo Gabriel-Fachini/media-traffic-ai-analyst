@@ -10,9 +10,19 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.graph.date_normalizer import normalize_text as _normalize_text
-from tests.deterministic_router import build_router_decision
-from app.graph.workflow import build_analytics_graph
+from app.graph.date_normalizer import (
+    _extract_relative_date_range,
+    _extract_valid_and_invalid_explicit_dates,
+    _resolve_reference_date,
+    normalize_text as _normalize_text,
+)
+from app.graph.workflow import (
+    INVALID_DATES_MESSAGE,
+    MISSING_DATES_MESSAGE,
+    OUT_OF_SCOPE_MESSAGE,
+    UNSUPPORTED_DIMENSION_MESSAGE,
+    build_analytics_graph,
+)
 from app.schemas.router import RouterDecision
 from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
 
@@ -309,6 +319,94 @@ class FakeSynthesisLLM:
         return AIMessage(content=f"SYNTH::{tool_name}::{question}")
 
 
+_FAKE_UNSUPPORTED_DIMENSION_TOKENS: frozenset[str] = frozenset(
+    {"campanha", "campanhas", "campaign", "campaigns", "anuncio", "anuncios", "ad", "ads"}
+)
+_FAKE_SOURCE_MAP: dict[str, str] = {
+    "search": "Search",
+    "organic": "Organic",
+    "facebook": "Facebook",
+    "instagram": "Instagram",
+}
+_FAKE_PERFORMANCE_TOKENS: frozenset[str] = frozenset(
+    {"receita", "pedido", "pedidos", "revenue", "performance", "melhor", "ranking", "faturamento"}
+)
+_FAKE_VOLUME_TOKENS: frozenset[str] = frozenset(
+    {"usuario", "usuarios", "trafego", "traffic", "volume"}
+)
+
+
+def _fake_classify(question: str) -> RouterDecision:
+    """Minimal deterministic classifier for test fakes — not production-accurate."""
+    ref = _resolve_reference_date(None)
+    valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
+    relative_range, invalid_relative = _extract_relative_date_range(question, reference_date=ref)
+
+    tokens = set(re.findall(r"[a-z0-9_]+", _normalize_text(question)))
+    traffic_source: str | None = next((v for k, v in _FAKE_SOURCE_MAP.items() if k in tokens), None)
+
+    if _FAKE_UNSUPPORTED_DIMENSION_TOKENS & tokens:
+        return RouterDecision(
+            intent="out_of_scope",
+            refusal_reason="unsupported_dimension",
+            response_message=UNSUPPORTED_DIMENSION_MESSAGE,
+        )
+
+    start_date = end_date = None
+    if len(valid_dates) >= 2:
+        start_date, end_date = valid_dates[0], valid_dates[1]
+        if start_date > end_date:
+            invalid_dates = [*invalid_dates, "inverted"]
+            start_date = end_date = None
+    elif len(valid_dates) == 1:
+        start_date = end_date = valid_dates[0]
+    elif relative_range is not None:
+        start_date, end_date = relative_range
+
+    if invalid_dates or invalid_relative:
+        return RouterDecision(
+            intent="channel_performance",
+            traffic_source=traffic_source,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
+    has_performance = bool(_FAKE_PERFORMANCE_TOKENS & tokens)
+    has_volume = bool(_FAKE_VOLUME_TOKENS & tokens)
+
+    # No analytics context at all — out_of_scope triggers merge in FakeRouterRunnable.
+    if not has_performance and not has_volume and traffic_source is None:
+        return RouterDecision(
+            intent="out_of_scope",
+            refusal_reason="out_of_scope",
+            response_message=OUT_OF_SCOPE_MESSAGE,
+        )
+
+    if has_performance:
+        intent = "channel_performance"
+    elif has_volume:
+        intent = "traffic_volume"
+    else:
+        intent = "ambiguous_analytics"
+
+    if start_date is None:
+        return RouterDecision(
+            intent=intent,
+            traffic_source=traffic_source,
+            needs_clarification=True,
+            clarification_reason="missing_dates",
+            response_message=MISSING_DATES_MESSAGE,
+        )
+
+    return RouterDecision(
+        intent=intent,
+        traffic_source=traffic_source,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
 _DIAGNOSTIC_WORDS: frozenset[str] = frozenset(
     {"explica", "explicar", "causa", "hipotese", "diagnostico", "motivo"}
 )
@@ -348,7 +446,7 @@ class FakeRouterRunnable:
                 elif content and content != question and not prev_human_question:
                     prev_human_question = content
 
-        base_decision = build_router_decision(question)
+        base_decision = _fake_classify(question)
 
         # Complete decision — return without further inspection.
         if not base_decision.needs_clarification and base_decision.refusal_reason is None:
@@ -386,7 +484,7 @@ class FakeRouterRunnable:
         # A channel-specific query (traffic_source set) is treated as a fresh question.
         if prev_human_question and base_decision.normalized_params.traffic_source is None:
             combined = f"{prev_human_question.rstrip()} {question.strip()}".strip()
-            combined_decision = build_router_decision(combined)
+            combined_decision = _fake_classify(combined)
             if (
                 not combined_decision.needs_clarification
                 and combined_decision.refusal_reason is None

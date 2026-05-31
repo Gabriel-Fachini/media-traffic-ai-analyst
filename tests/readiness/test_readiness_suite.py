@@ -7,8 +7,6 @@ from typing import Any, Iterator, Mapping, cast
 from fastapi.testclient import TestClient
 import pytest
 
-from app.graph.workflow import INVALID_DATES_MESSAGE
-from tests.deterministic_router import build_router_decision
 from app.graph.workflow import (
     MISSING_DATES_MESSAGE,
     invoke_analytics_graph,
@@ -21,9 +19,6 @@ from tests.fakes import DeterministicGraphBundle, build_deterministic_graph_bund
 
 
 pytestmark = pytest.mark.readiness
-
-REFERENCE_DATE = date(2026, 4, 20)
-
 
 @pytest.fixture
 def graph_bundle() -> DeterministicGraphBundle:
@@ -222,90 +217,6 @@ def test_graph_follow_ups_do_not_regress_to_out_of_scope(
     assert router_decision["refusal_reason"] is None
     assert _require_list(second_state, "tools_used") == []
     assert _require_str(second_state, "final_answer") == f"FOLLOW_UP::{follow_up_question}"
-
-
-def test_router_guardrails_cover_scope_metric_dimension_and_invalid_ranges() -> None:
-    out_of_scope = build_router_decision("Me conta uma piada", reference_date=REFERENCE_DATE)
-    unsupported_metric = build_router_decision(
-        "Qual foi o ROAS de Search ontem?",
-        reference_date=REFERENCE_DATE,
-    )
-    unsupported_dimension = build_router_decision(
-        "Qual campanha deu mais lucro no Facebook ontem?",
-        reference_date=REFERENCE_DATE,
-    )
-    invalid_single_date = build_router_decision(
-        "Qual foi a receita de Search em 31/02/2026?",
-        reference_date=REFERENCE_DATE,
-    )
-    inverted_range = build_router_decision(
-        "Qual foi a receita de Search entre 2024-02-10 e 2024-01-10?",
-        reference_date=REFERENCE_DATE,
-    )
-
-    assert out_of_scope.intent == "out_of_scope"
-    assert out_of_scope.refusal_reason == "out_of_scope"
-    assert unsupported_metric.intent == "out_of_scope"
-    assert unsupported_metric.refusal_reason == "unsupported_metric"
-    assert unsupported_dimension.intent == "out_of_scope"
-    assert unsupported_dimension.refusal_reason == "unsupported_dimension"
-    assert invalid_single_date.clarification_reason == "invalid_dates"
-    assert invalid_single_date.response_message == INVALID_DATES_MESSAGE
-    assert inverted_range.clarification_reason == "invalid_dates"
-    assert inverted_range.response_message == INVALID_DATES_MESSAGE
-
-
-@pytest.mark.parametrize(
-    ("question", "expected_start_date", "expected_end_date"),
-    [
-        (
-            "Usuarios de Search entre 2024-01-01 e 2024-01-31",
-            date(2024, 1, 1),
-            date(2024, 1, 31),
-        ),
-        (
-            "Usuarios de Search entre 01/01/2024 e 31/01/2024",
-            date(2024, 1, 1),
-            date(2024, 1, 31),
-        ),
-        (
-            "Usuarios de Search entre 01/01/24 e 31/01/24",
-            date(2024, 1, 1),
-            date(2024, 1, 31),
-        ),
-        (
-            "Receita de Search ontem",
-            date(2026, 4, 19),
-            date(2026, 4, 19),
-        ),
-        (
-            "Volume de trafego este mes",
-            date(2026, 4, 1),
-            date(2026, 4, 20),
-        ),
-        (
-            "Receita por canal no ultimo mes",
-            date(2026, 3, 1),
-            date(2026, 3, 31),
-        ),
-        (
-            "Usuarios nos ultimos 7 dias",
-            date(2026, 4, 14),
-            date(2026, 4, 20),
-        ),
-    ],
-)
-def test_router_resolves_all_priority_date_formats(
-    question: str,
-    expected_start_date: date,
-    expected_end_date: date,
-) -> None:
-    decision = build_router_decision(question, reference_date=REFERENCE_DATE)
-
-    assert decision.normalized_params.start_date == expected_start_date
-    assert decision.normalized_params.end_date == expected_end_date
-    assert decision.clarification_reason is None
-    assert decision.refusal_reason is None
 
 
 class _FakeBigQueryClient:

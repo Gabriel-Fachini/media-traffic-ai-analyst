@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 RouterIntent = Literal[
     "traffic_volume",
@@ -28,7 +28,7 @@ RouterRefusalReason = Literal[
 
 
 class RouterNormalizedParams(BaseModel):
-    """Normalized router parameters. Used by deterministic_router as a value object."""
+    """Backward-compatible view of flat RouterDecision date/source fields."""
 
     traffic_source: str | None = Field(
         default=None,
@@ -95,6 +95,24 @@ class RouterDecision(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("start_date", "end_date", mode="before")
+    @classmethod
+    def coerce_invalid_date_to_none(cls, value: object) -> object:
+        """LLM may return invalid dates (e.g. 2026-02-31) when flagging invalid_dates.
+
+        Parse failure would blow up before model_validator runs, losing the
+        needs_clarification/clarification_reason the LLM correctly set. Return None
+        instead so the decision survives and preprocess_node can emit the clarification.
+        """
+        if not isinstance(value, str):
+            return value
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(value)
+        except ValueError:
+            return None
+        return value
 
     @property
     def normalized_params(self) -> RouterNormalizedParams:
