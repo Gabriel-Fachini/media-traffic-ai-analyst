@@ -5,8 +5,9 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
 
-from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
-from app.tools import channel_performance_analyzer, traffic_volume_analyzer
+from app.core.analytics.models import ChannelPerformanceInput, TrafficVolumeInput
+from app.core.analytics.channel_performance import channel_performance_analyzer
+from app.core.analytics.traffic_volume import traffic_volume_analyzer
 
 
 def _run_traffic_volume_analyzer(

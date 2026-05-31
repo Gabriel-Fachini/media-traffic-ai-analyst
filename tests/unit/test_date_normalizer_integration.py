@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app.graph.workflow import _apply_date_normalizer
-from app.schemas.router import RouterDecision, RouterIntent
+from app.core.router.date_resolution import apply_date_normalizer as _apply_date_normalizer
+from app.core.router.decision import RouterDecision, RouterIntent
 
 
 pytestmark = pytest.mark.unit

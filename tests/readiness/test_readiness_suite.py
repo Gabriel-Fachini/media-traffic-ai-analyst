@@ -7,17 +7,14 @@ from typing import Any, Iterator, Mapping, cast
 from fastapi.testclient import TestClient
 import pytest
 
-from app.graph.workflow import (
-    MISSING_DATES_MESSAGE,
-    invoke_analytics_graph,
-)
+from app.agent.graph import invoke_analytics_graph
+from app.agent.messages import MISSING_DATES_MESSAGE
 from app.infra.env import get_settings
 from app.infra.config import Settings
 from app.api.routes import app
 from app.api.deps import get_query_graph
-from app.schemas.api import QueryResponse
-from app.tools.channel_performance_analyzer import CHANNEL_PERFORMANCE_SQL
-from app.tools.traffic_volume_analyzer import TRAFFIC_VOLUME_SQL
+from app.api.schemas import QueryResponse
+from app.core.analytics.queries import CHANNEL_PERFORMANCE_SQL, TRAFFIC_VOLUME_SQL
 from tests.fakes import DeterministicGraphBundle, build_deterministic_graph_bundle
 
 
@@ -271,9 +268,9 @@ def test_tool_sql_contracts_remain_parameterized_and_mvp_scoped() -> None:
 
 
 def test_tools_pass_parameterized_queries_to_bigquery_client() -> None:
-    from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
-    from app.tools.channel_performance_analyzer import channel_performance_analyzer
-    from app.tools.traffic_volume_analyzer import traffic_volume_analyzer
+    from app.core.analytics.models import ChannelPerformanceInput, TrafficVolumeInput
+    from app.core.analytics.channel_performance import channel_performance_analyzer
+    from app.core.analytics.traffic_volume import traffic_volume_analyzer
 
     traffic_client = _FakeBigQueryClient(
         rows=[{"traffic_source": "Search", "user_count": 10}]

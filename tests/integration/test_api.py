@@ -10,10 +10,11 @@ import pytest
 from app.infra.llm import LlmTimeoutError
 from app.infra.env import get_settings
 from app.infra.config import Settings
-from app.graph.workflow import TEMPORARY_TOOL_FAILURE_MESSAGE, ToolExecutionError
+from app.agent.graph import ToolExecutionError
+from app.agent.messages import TEMPORARY_TOOL_FAILURE_MESSAGE
 from app.api.routes import app
 from app.api.deps import LLM_TIMEOUT_ERROR_MESSAGE, get_query_graph
-from app.schemas.api import ErrorResponse, QueryResponse
+from app.api.schemas import ErrorResponse, QueryResponse
 from tests.fakes import DeterministicGraphBundle, build_deterministic_graph_bundle
 
 

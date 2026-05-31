@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.cli import _format_debug_info, _iter_sse_events, _resolve_stream_api_url
-from app.schemas import DebugInfo, TokenUsage, TurnObservability
+from app.api.schemas import DebugInfo, TokenUsage, TurnObservability
 
 
 def test_cli_resolves_stream_url_from_query_endpoint() -> None:

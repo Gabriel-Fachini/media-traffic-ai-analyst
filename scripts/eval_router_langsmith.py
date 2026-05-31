@@ -34,7 +34,7 @@ from typing import Any, Sequence
 
 from langsmith.evaluation import EvaluationResult, EvaluationResults
 
-from app.graph.llm_router import classify_question
+from app.core.router.classifier import classify_question
 from app.infra.env import get_settings
 
 CASES_PATH = Path(__file__).resolve().parent.parent / "tests" / "eval" / "router_cases.jsonl"
