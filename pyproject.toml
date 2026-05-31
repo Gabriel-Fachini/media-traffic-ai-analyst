@@ -14,6 +14,7 @@ dependencies = [
 	"langchain-anthropic>=1.1.0,<2.0.0",
 	"langchain-openai>=1.0.1,<2.0.0",
 	"langchain-ollama (>=0.2.0,<1.0.0)",
+	"langsmith>=0.7.0,<1.0.0",
 	"google-cloud-bigquery>=3.31.0,<4.0.0",
 	"fastapi-cli>=0.0.24,<0.0.25",
 	"httpx>=0.28.1,<0.29.0",
@@ -23,7 +24,7 @@ dependencies = [
 
 [project.scripts]
 analyst-chat = "app.cli:entrypoint"
-verify = "app.verify:main"
+verify = "scripts.verify:main"
 
 [tool.poetry]
 packages = [{ include = "app" }]
@@ -35,16 +36,16 @@ pytest = "^9.0.3"
 langgraph-cli = {extras = ["inmem"], version = "^0.4.27"}
 
 [tool.fastapi]
-entrypoint = "app.main:app"
+entrypoint = "app.api.routes:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
 	"unit: deterministic unit tests for pure business logic and contracts",
 	"integration: deterministic integration tests for workflow and API behavior",
+	"eval: offline regression gate for router behavior",
 	"live: opt-in tests that use real BigQuery and/or LLM providers",
 	"readiness: curated readiness checks for the highest-priority delivery scenarios",
-	"eval: accuracy evaluation harness — runs offline, reports accuracy per field",
 ]
 addopts = ["--strict-markers", "-ra"]
 

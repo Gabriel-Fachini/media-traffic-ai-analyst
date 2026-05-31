@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from app import verify
+from scripts import verify
 
 
 pytestmark = pytest.mark.unit

@@ -6,8 +6,8 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.api import QueryRequest
-from app.utils.config import Settings, SettingsError
+from app.api.schemas import QueryRequest
+from app.infra.config import Settings, SettingsError
 
 
 pytestmark = pytest.mark.unit

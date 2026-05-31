@@ -21,7 +21,12 @@ import re
 import sys
 
 # Files responsible for building / running BigQuery SQL.
-GUARDED = ("app/tools/", "bigquery_client.py")
+GUARDED = (
+    "app/core/analytics/queries.py",
+    "app/infra/bigquery.py",
+    "app/tools/",
+    "bigquery_client.py",
+)
 
 SQL_KEYWORD = re.compile(r"\b(SELECT|FROM|WHERE|JOIN|GROUP\s+BY|ORDER\s+BY)\b", re.I)
 
@@ -60,8 +65,10 @@ def main() -> int:
     if not SQL_KEYWORD.search(content):
         return 0  # no SQL here, nothing to enforce
 
+    dataset_only_interpolation = re.sub(r"\{DATASET_ID\}", "", content)
+
     for pat in DANGER:
-        m = pat.search(content)
+        m = pat.search(dataset_only_interpolation)
         if m:
             print(
                 "BLOCKED: looks like non-parametrized SQL in "

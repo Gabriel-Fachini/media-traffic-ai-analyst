@@ -6,15 +6,10 @@ from typing import Any, cast
 
 import pytest
 
-from app.tools.channel_performance_analyzer import (
-    CHANNEL_PERFORMANCE_SQL,
-    channel_performance_analyzer,
-)
-from app.tools.traffic_volume_analyzer import (
-    TRAFFIC_VOLUME_SQL,
-    traffic_volume_analyzer,
-)
-from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
+from app.core.analytics.queries import CHANNEL_PERFORMANCE_SQL, TRAFFIC_VOLUME_SQL
+from app.core.analytics.channel_performance import channel_performance_analyzer
+from app.core.analytics.traffic_volume import traffic_volume_analyzer
+from app.core.analytics.models import ChannelPerformanceInput, TrafficVolumeInput
 
 
 pytestmark = pytest.mark.unit

@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app.graph.workflow import _apply_date_normalizer
-from app.schemas.router import RouterDecision, RouterIntent
+from app.core.router.date_resolution import apply_date_normalizer as _apply_date_normalizer
+from app.core.router.decision import RouterDecision, RouterIntent
 
 
 pytestmark = pytest.mark.unit
@@ -71,7 +71,7 @@ def test_apply_date_normalizer_resolves_relative_period_and_clears_missing_dates
     expected_end: date,
 ) -> None:
     decision = _llm_missing_dates_decision()
-    with patch("app.graph.date_normalizer.date") as mock_date:
+    with patch("app.core.dates.date") as mock_date:
         mock_date.today.return_value = _TODAY
         mock_date.side_effect = lambda *args, **kwargs: date(*args, **kwargs)
         result = _apply_date_normalizer(question, decision)

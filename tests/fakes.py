@@ -1,20 +1,37 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.graph.date_normalizer import normalize_text as _normalize_text
-from tests.deterministic_router import build_router_decision
-from app.graph.workflow import build_analytics_graph
-from app.schemas.router import RouterDecision
-from app.schemas.tools import ChannelPerformanceInput, TrafficVolumeInput
+from app.core.dates import (
+    extract_relative_date_range as _extract_relative_date_range,
+    _extract_valid_and_invalid_explicit_dates,
+    _resolve_reference_date,
+    normalize_text as _normalize_text,
+)
+from app.agent.graph import build_analytics_graph
+from app.agent.messages import (
+    INVALID_DATES_MESSAGE,
+    MISSING_DATES_MESSAGE,
+    OUT_OF_SCOPE_MESSAGE,
+    UNSUPPORTED_DIMENSION_MESSAGE,
+)
+from app.core.router.decision import RouterDecision
+from app.core.analytics.models import ChannelPerformanceInput, TrafficVolumeInput
 
 
 def _extract_text(content: Any) -> str:
@@ -41,6 +58,17 @@ def _extract_section(content: str, start: str, end: str | None = None) -> str:
     if end is not None and end in section:
         section = section.split(end, maxsplit=1)[0]
     return section.strip()
+
+
+def _fake_usage_metadata(
+    input_tokens: int,
+    output_tokens: int,
+) -> dict[str, int]:
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
 
 
 @dataclass(frozen=True)
@@ -197,7 +225,10 @@ class FakeAgentLLM:
                 question = _extract_text(message.content)
                 if question:
                     break
-        return AIMessage(content=f"FOLLOW_UP::{question}")
+        return AIMessage(
+            content=f"FOLLOW_UP::{question}",
+            usage_metadata=_fake_usage_metadata(18, 12),
+        )
 
     def _build_ambiguous_metric_clarification(self, messages: list[Any]) -> AIMessage:
         question = ""
@@ -214,7 +245,8 @@ class FakeAgentLLM:
                 f"Entendi a pergunta sobre {channel_label}, mas preciso alinhar o foco antes. "
                 "Voce quer ver volume de usuarios ou performance financeira "
                 "(receita e pedidos)?"
-            )
+            ),
+            usage_metadata=_fake_usage_metadata(16, 20),
         )
 
     def _has_tool_message(self, messages: list[Any]) -> bool:
@@ -244,7 +276,10 @@ class FakeAgentLLM:
                 if isinstance(msg, HumanMessage):
                     question = _extract_text(msg.content)
                     break
-            return AIMessage(content=f"SYNTH::{tool_name}::{question}")
+            return AIMessage(
+                content=f"SYNTH::{tool_name}::{question}",
+                usage_metadata=_fake_usage_metadata(28, 24),
+            )
 
         if self._has_follow_up_context(messages):
             return self._build_follow_up_answer(messages)
@@ -274,12 +309,46 @@ class FakeAgentLLM:
                     "type": "tool_call",
                 }
             ],
+            usage_metadata=_fake_usage_metadata(22, 8),
         )
+
+    async def astream(self, messages: list[Any]) -> Any:
+        """Yield deterministic chunks so graph streaming paths are exercised in tests."""
+        response = self.invoke(messages)
+
+        if response.tool_calls:
+            tool_call = response.tool_calls[0]
+            yield AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": tool_call["name"],
+                        "args": json.dumps(tool_call["args"], ensure_ascii=False),
+                        "id": tool_call["id"],
+                        "index": 0,
+                        "type": "tool_call_chunk",
+                    }
+                ],
+                usage_metadata=response.usage_metadata,
+            )
+            return
+
+        response_text = _extract_text(response.content)
+        midpoint = max(1, len(response_text) // 2)
+        first_chunk = response_text[:midpoint]
+        second_chunk = response_text[midpoint:]
+
+        yield AIMessageChunk(content=first_chunk)
+        if second_chunk:
+            yield AIMessageChunk(
+                content=second_chunk,
+                usage_metadata=response.usage_metadata,
+            )
 
 
 @dataclass
 class FakeSynthesisLLM:
-    """Plain LLM fake used by the insight_synthesizer (follow-ups only)."""
+    """Plain LLM fake for synthesis/follow-up paths (no tool calls)."""
 
     prompts: list[str] = field(default_factory=list)
 
@@ -293,7 +362,10 @@ class FakeSynthesisLLM:
                 "Pergunta de follow-up:\n",
                 "\n\nContexto analitico anterior:\n",
             )
-            return AIMessage(content=f"FOLLOW_UP::{question}")
+            return AIMessage(
+                content=f"FOLLOW_UP::{question}",
+                usage_metadata=_fake_usage_metadata(18, 12),
+            )
 
         question = _extract_section(
             prompt,
@@ -306,14 +378,136 @@ class FakeSynthesisLLM:
             tool_name = "channel_performance_analyzer"
         else:
             tool_name = "unknown"
-        return AIMessage(content=f"SYNTH::{tool_name}::{question}")
+        return AIMessage(
+            content=f"SYNTH::{tool_name}::{question}",
+            usage_metadata=_fake_usage_metadata(28, 24),
+        )
+
+
+_FAKE_UNSUPPORTED_DIMENSION_TOKENS: frozenset[str] = frozenset(
+    {"campanha", "campanhas", "campaign", "campaigns", "anuncio", "anuncios", "ad", "ads"}
+)
+_FAKE_SOURCE_MAP: dict[str, str] = {
+    "search": "Search",
+    "organic": "Organic",
+    "facebook": "Facebook",
+    "instagram": "Instagram",
+}
+_FAKE_PERFORMANCE_TOKENS: frozenset[str] = frozenset(
+    {"receita", "pedido", "pedidos", "revenue", "performance", "ranking", "faturamento", "vendeu"}
+)
+_FAKE_VOLUME_TOKENS: frozenset[str] = frozenset(
+    {"usuario", "usuarios", "trafego", "traffic", "volume"}
+)
+_FAKE_AMBIGUOUS_ANALYTICS_TOKENS: frozenset[str] = frozenset(
+    {"melhor", "melhores", "pior", "piores", "performou", "performando"}
+)
+
+
+def _fake_classify(question: str) -> RouterDecision:
+    """Minimal deterministic classifier for test fakes — not production-accurate."""
+    ref = _resolve_reference_date(None)
+    valid_dates, invalid_dates = _extract_valid_and_invalid_explicit_dates(question)
+    relative_range, invalid_relative = _extract_relative_date_range(question, reference_date=ref)
+
+    tokens = set(re.findall(r"[a-z0-9_]+", _normalize_text(question)))
+    traffic_source: str | None = next((v for k, v in _FAKE_SOURCE_MAP.items() if k in tokens), None)
+
+    if _FAKE_UNSUPPORTED_DIMENSION_TOKENS & tokens:
+        return RouterDecision(
+            intent="out_of_scope",
+            refusal_reason="unsupported_dimension",
+            response_message=UNSUPPORTED_DIMENSION_MESSAGE,
+        )
+
+    start_date = end_date = None
+    if len(valid_dates) >= 2:
+        start_date, end_date = valid_dates[0], valid_dates[1]
+        if start_date > end_date:
+            invalid_dates = [*invalid_dates, "inverted"]
+            start_date = end_date = None
+    elif len(valid_dates) == 1:
+        start_date = end_date = valid_dates[0]
+    elif relative_range is not None:
+        start_date, end_date = relative_range
+
+    has_performance = bool(_FAKE_PERFORMANCE_TOKENS & tokens)
+    has_volume = bool(_FAKE_VOLUME_TOKENS & tokens)
+
+    if has_performance:
+        intent = "channel_performance"
+    elif has_volume:
+        intent = "traffic_volume"
+    else:
+        intent = "ambiguous_analytics"
+
+    if invalid_dates or invalid_relative:
+        return RouterDecision(
+            intent=intent,
+            traffic_source=traffic_source,
+            needs_clarification=True,
+            clarification_reason="invalid_dates",
+            response_message=INVALID_DATES_MESSAGE,
+        )
+
+    has_ambiguous_analytics = bool(_FAKE_AMBIGUOUS_ANALYTICS_TOKENS & tokens)
+
+    # No analytics context at all — out_of_scope triggers merge in FakeRouterRunnable.
+    if (
+        not has_performance
+        and not has_volume
+        and not has_ambiguous_analytics
+        and traffic_source is None
+    ):
+        return RouterDecision(
+            intent="out_of_scope",
+            refusal_reason="out_of_scope",
+            response_message=OUT_OF_SCOPE_MESSAGE,
+        )
+
+    if start_date is None:
+        return RouterDecision(
+            intent=intent,
+            traffic_source=traffic_source,
+            needs_clarification=True,
+            clarification_reason="missing_dates",
+            response_message=MISSING_DATES_MESSAGE,
+        )
+
+    return RouterDecision(
+        intent=intent,
+        traffic_source=traffic_source,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 _DIAGNOSTIC_WORDS: frozenset[str] = frozenset(
-    {"explica", "explicar", "causa", "hipotese", "diagnostico", "motivo"}
+    {
+        "explica",
+        "explicar",
+        "causa",
+        "hipotese",
+        "diagnostico",
+        "motivo",
+        "melhor",
+        "pior",
+    }
 )
 _STRATEGY_WORDS: frozenset[str] = frozenset(
-    {"acao", "acoes", "priorizar", "recomend", "sugest", "plano", "melhorar", "fortalecer"}
+    {
+        "acao",
+        "acoes",
+        "priorizar",
+        "recomend",
+        "sugest",
+        "plano",
+        "melhorar",
+        "fortalecer",
+        "monte",
+        "retorne",
+        "analise",
+    }
 )
 _GENERIC_FOLLOW_UP_WORDS: frozenset[str] = frozenset(
     {"ajude", "ajudar", "continue", "continuar", "segue", "seguir", "siga"}
@@ -348,7 +542,7 @@ class FakeRouterRunnable:
                 elif content and content != question and not prev_human_question:
                     prev_human_question = content
 
-        base_decision = build_router_decision(question)
+        base_decision = _fake_classify(question)
 
         # Complete decision — return without further inspection.
         if not base_decision.needs_clarification and base_decision.refusal_reason is None:
@@ -386,7 +580,7 @@ class FakeRouterRunnable:
         # A channel-specific query (traffic_source set) is treated as a fresh question.
         if prev_human_question and base_decision.normalized_params.traffic_source is None:
             combined = f"{prev_human_question.rstrip()} {question.strip()}".strip()
-            combined_decision = build_router_decision(combined)
+            combined_decision = _fake_classify(combined)
             if (
                 not combined_decision.needs_clarification
                 and combined_decision.refusal_reason is None
@@ -410,7 +604,6 @@ def build_deterministic_graph_bundle() -> DeterministicGraphBundle:
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
         agent_llm=fake_agent_llm,
-        response_llm=fake_synthesis_llm,
         router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),

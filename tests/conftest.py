@@ -10,6 +10,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Inclui os testes marcados como live junto com a suite padrao.",
     )
+    parser.addoption(
+        "--agent",
+        action="store_true",
+        default=False,
+        help="Mantem compatibilidade com harness compacto usado na documentacao.",
+    )
 
 
 def pytest_collection_modifyitems(

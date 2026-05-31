@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import uuid4
@@ -9,24 +10,26 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from app.clients.bigquery_client import BigQueryClientError
-from app.graph.workflow import (
+from app.infra.bigquery import BigQueryClientError
+from app.agent.graph import (
     AnalyticsGraphState,
-    MISSING_DATES_MESSAGE,
-    TEMPORARY_TOOL_FAILURE_MESSAGE,
     ToolExecutionError,
-    UNSUPPORTED_DIMENSION_MESSAGE,
+    astream_analytics_graph_events,
     build_analytics_graph,
     invoke_analytics_graph,
 )
-from app.schemas.tools import ChannelPerformanceInput
-from app.schemas.router import RouterDecision
+from app.agent.messages import (
+    MISSING_DATES_MESSAGE,
+    TEMPORARY_TOOL_FAILURE_MESSAGE,
+    UNSUPPORTED_DIMENSION_MESSAGE,
+)
+from app.core.analytics.models import ChannelPerformanceInput
+from app.core.router.decision import RouterDecision
 from tests.fakes import (
     DeterministicGraphBundle,
     FakeAgentLLM,
     FakeAnalyticsTools,
     FakeRouterRunnable,
-    FakeSynthesisLLM,
     build_deterministic_graph_bundle,
 )
 
@@ -82,6 +85,32 @@ def test_graph_llm_decides_to_call_traffic_volume_tool(
     assert graph_bundle.tools.calls[0].tool_name == "traffic_volume_analyzer"
     # The agent LLM was invoked (first for tool_calls, then for synthesis).
     assert len(graph_bundle.agent_llm.prompts) >= 1
+
+
+def test_graph_exposes_langgraph_astream_events(
+    graph_bundle: DeterministicGraphBundle,
+) -> None:
+    async def collect_events() -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        async for event in astream_analytics_graph_events(
+            "Quais canais trouxeram mais usuarios entre 2024-01-01 e 2024-01-31?",
+            graph=graph_bundle.graph,
+            thread_id="stream-thread",
+            version="v2",
+        ):
+            events.append(event)
+        return events
+
+    events = asyncio.run(collect_events())
+
+    event_names = [str(event.get("event")) for event in events]
+    assert "on_chain_start" in event_names
+    assert "on_chain_end" in event_names
+    assert any(event.get("name") == "preprocess" for event in events)
+    assert any(event.get("name") == "agent" for event in events)
+    assert any(event.get("name") == "tool_executor" for event in events)
+    assert any(event.get("event") == "on_tool_start" for event in events)
+    assert any(event.get("event") == "on_tool_end" for event in events)
 
 
 def test_graph_routes_aggregate_user_volume_query_without_channel(
@@ -373,9 +402,10 @@ def test_graph_routes_contextual_comparison_follow_up_without_new_tool_execution
     assert len(graph_bundle.tools.calls) == 1
 
 
-def test_graph_treats_follow_up_with_new_channel_as_new_question(
+def test_graph_inherits_relative_date_when_follow_up_specifies_new_channel(
     graph_bundle: DeterministicGraphBundle,
 ) -> None:
+    """Date from a prior turn should carry forward when the follow-up only changes channel."""
     thread_id = "source-change-thread"
 
     invoke_analytics_graph(
@@ -390,11 +420,12 @@ def test_graph_treats_follow_up_with_new_channel_as_new_question(
     )
     router_decision = _require_router_decision(second_state)
 
-    assert _require_str(second_state, "final_answer") == MISSING_DATES_MESSAGE
-    assert _require_list(second_state, "tools_used") == []
+    # Turn 1 triggered ambiguous_analytics (no "receita"/"volume" keyword) → clarification,
+    # no tool call. Turn 2 inherits "ontem" from thread and executes the tool.
+    assert "channel_performance_analyzer" in _require_list(second_state, "tools_used")
     assert _require_str(second_state, "resolved_question") == "receita de Facebook"
     assert router_decision.normalized_params.traffic_source == "Facebook"
-    assert graph_bundle.tools.calls == []
+    assert len(graph_bundle.tools.calls) == 1
 
 
 def test_graph_treats_explicit_channel_query_after_aggregate_analysis_as_new_question(
@@ -551,11 +582,9 @@ class ParaphrasedAmbiguousMetricClarifyingAgentLLM(FakeAgentLLM):
 
 def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     clarifying_agent_llm = ClarifyingAgentLLM()
-    synthesis_llm = FakeSynthesisLLM()
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
         agent_llm=clarifying_agent_llm,
-        response_llm=synthesis_llm,
         router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),
@@ -612,11 +641,9 @@ def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clari
 
 def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> None:
     clarifying_agent_llm = ParaphrasedAmbiguousMetricClarifyingAgentLLM()
-    synthesis_llm = FakeSynthesisLLM()
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
         agent_llm=clarifying_agent_llm,
-        response_llm=synthesis_llm,
         router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),

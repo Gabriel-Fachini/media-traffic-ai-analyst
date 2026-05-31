@@ -129,17 +129,25 @@ Developer plan: 1 dev, 5k traces/mes, gratis. Suficiente para projeto pessoal.
 
 ### Tarefas
 
-- [ ] 2.1 Integrar LangSmith via env (`LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`,
+- [x] 2.1 Integrar LangSmith via env (`LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`,
       `LANGCHAIN_PROJECT`). Opt-in, sem quebrar quem nao configurar. Documentar em
-      `.env.example`.
-- [ ] 2.2 Conectar a Fase 0: rodar o eval do router como dataset/experiment no
-      LangSmith (opcional, gated por env).
-- [ ] 2.3 Streaming no graph: expor `astream_events` do LangGraph.
-- [ ] 2.4 Endpoint SSE em `app/main.py` (ex: `POST /query/stream`) emitindo
+      `.env.example`. Gating em `Settings.apply_runtime_environment`
+      (`app/utils/config.py`): so exporta as env vars quando as 3 estao presentes.
+- [x] 2.2 Conectar a Fase 0: rodar o eval do router como dataset/experiment no
+      LangSmith (opcional, gated por env). Script standalone
+      `scripts/eval_router_langsmith.py`: sobe `router_cases.jsonl` como dataset
+      (idempotente), roda `evaluate()` contra o router LLM real (`classify_question`),
+      avalia so os campos decididos pelo LLM (datas ficam no eval offline).
+      Limpeza: `test_router_eval.py`, `tests/deterministic_router.py` e
+      `tests/unit/test_router.py` removidos (testavam codigo morto de producao);
+      `FakeRouterRunnable` reescrito sobre `date_normalizer` + construcao direta
+      de `RouterDecision`.
+- [x] 2.3 Streaming no graph: expor `astream_events` do LangGraph.
+- [x] 2.4 Endpoint SSE em `app/main.py` (ex: `POST /query/stream`) emitindo
       tokens + eventos de tool call. Manter `/query` sincrono para compatibilidade.
-- [ ] 2.5 CLI (`app/cli.py`) consumindo o stream: render incremental + indicacao
+- [x] 2.5 CLI (`app/cli.py`) consumindo o stream: render incremental + indicacao
       de tool em execucao.
-- [ ] 2.6 Formalizar o `X-Debug` atual (`app/main.py:91`) como camada de
+- [x] 2.6 Formalizar o `X-Debug` atual (`app/main.py:91`) como camada de
       observabilidade (latencia, tokens, tool por turno) alem do trace remoto.
 
 ### Aceite

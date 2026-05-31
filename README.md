@@ -9,7 +9,7 @@ Agente conversacional de analytics para Mídia e Growth que interpreta perguntas
 - **Orquestração:** LangGraph (StateGraph com checkpointing in-memory)
 - **Roteamento:** classificação de intent por LLM com `with_structured_output(RouterDecision)`; normalização de datas determinística
 - **API:** FastAPI
-- **CLI:** `analyst-chat` — cliente conversacional que consome a API local
+- **CLI:** `analyst-chat` — cliente conversacional que consome o stream SSE da API local
 - **LLM:** OpenAI ou Anthropic (configurável por env, com fallback entre providers)
 - **Dados:** Google BigQuery via cliente oficial Python, SQL parametrizada
 - **Tipagem e contratos:** Pydantic v2, type hints, Pyright
@@ -59,7 +59,7 @@ O grafo separa três responsabilidades em nodes distintos:
 
 ### Decisões de design notáveis
 
-**Router LLM com normalização de datas determinística.** A classificação de intent, escopo e detecção de follow-up é feita por LLM com `with_structured_output(RouterDecision)` (`app/graph/llm_router.py`), recebendo o contexto do thread. A normalização de `start_date`/`end_date` permanece determinística (`app/graph/date_normalizer.py`), porque data é barata, exata e testável sem gastar tokens. Híbrido consciente: delega ao LLM só o que ele faz melhor (variação de linguagem natural), mantém regra onde regra ganha. Antes do router, um guard determinístico faz short-circuit de pergunta vazia sem chamar o LLM.
+**Router LLM com normalização de datas determinística.** A classificação de intent, escopo e detecção de follow-up é feita por LLM com `with_structured_output(RouterDecision)` (`app/core/router/classifier.py`), recebendo o contexto do thread. A normalização de `start_date`/`end_date` permanece determinística (`app/core/dates.py` + `app/core/router/date_resolution.py`), porque data é barata, exata e testável sem gastar tokens. Híbrido consciente: delega ao LLM só o que ele faz melhor (variação de linguagem natural), mantém regra onde regra ganha. Antes do router, um guard determinístico faz short-circuit de pergunta vazia sem chamar o LLM.
 
 **Eval antes de evoluir.** O router LLM é não-determinístico; mexer nele sem medir seria irresponsável. `tests/eval/` roda o router contra um dataset de casos (`router_cases.jsonl`) e reporta accuracy por campo, com baseline documentado — `poetry run pytest -m eval`.
 
@@ -79,16 +79,15 @@ O grafo separa três responsabilidades em nodes distintos:
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `app/main.py` | Superfície HTTP, contratos de entrada/saída, `X-Debug`, tratamento de timeout do LLM |
-| `app/cli.py` | CLI conversacional via API local |
-| `app/graph/workflow.py` | StateGraph: nodes `preprocess → agent → tool_executor`, roteamento via `Command(goto=...)`, loop de tool calling |
-| `app/graph/llm_router.py` | Router LLM: `classify_question` com `with_structured_output(RouterDecision)`, contexto do thread |
-| `app/graph/date_normalizer.py` | Normalização determinística de datas (absolutas e relativas) |
-| `app/graph/prompts.py` | Política conversacional, síntese de dados, follow-ups estratégicos e diagnósticos |
-| `app/graph/tools.py` | Registro das tools com `StructuredTool.from_function` |
-| `app/tools/*.py` | Queries SQL e mapeamento para outputs tipados |
-| `app/clients/bigquery_client.py` | Cliente BigQuery e encapsulamento de erros de infra |
-| `app/schemas/*.py` | Contratos Pydantic da API, router e tools |
+| `app/api/routes.py` | Superfície HTTP, contratos de entrada/saída, `/query`, `/query/stream`, `X-Debug`, tratamento de timeout do LLM |
+| `app/cli/app.py` | CLI conversacional via API local consumindo SSE |
+| `app/agent/graph.py` | StateGraph: nodes `preprocess → agent → tool_executor`, roteamento via `Command(goto=...)`, loop de tool calling |
+| `app/core/router/classifier.py` | Router LLM: `classify_question` com `with_structured_output(RouterDecision)`, contexto do thread |
+| `app/core/dates.py` | Normalização determinística de datas absolutas e relativas |
+| `app/agent/prompts.py` | Política conversacional, síntese de dados, follow-ups estratégicos e diagnósticos |
+| `app/agent/tools.py` | Registro canônico das tools com `StructuredTool.from_function` |
+| `app/core/analytics/*.py` | SQL, contratos tipados e transformação dos resultados analytics |
+| `app/infra/bigquery.py` | Cliente BigQuery e encapsulamento de erros de infra |
 
 ### Tools
 
@@ -198,12 +197,25 @@ Qualquer request pode incluir o header `X-Debug: true`. A resposta passa a conte
   "metadata": {
     "debug": {
       "resolved_question": "...",
-      "router_decision": { "intent": "channel_performance", ... },
-      "agent_tool_calls": [...]
+      "router_intent": "channel_performance",
+      "agent_tool_calls": [...],
+      "observability": {
+        "latency_ms": 187,
+        "llm_call_count": 3,
+        "tool_call_count": 1,
+        "tools_used": ["channel_performance_analyzer"],
+        "token_usage": {
+          "input_tokens": 50,
+          "output_tokens": 32,
+          "total_tokens": 82
+        }
+      }
     }
   }
 }
 ```
+
+Com `POST /query/stream`, o mesmo modo debug aparece no evento SSE final (`event: final`), permitindo que a CLI ou um front capturem os sinais de observabilidade do turno sem depender do payload cru do LangGraph.
 
 ## Validação
 
@@ -228,7 +240,7 @@ Variantes com output compacto para iterações rápidas: `--agent` em qualquer d
 O repositório versiona hooks do Claude Code em `.claude/` que tornam mecânicas as invariantes do projeto durante o desenvolvimento assistido por IA:
 
 - bloqueio de leitura/edição de segredos (`.env`, `credentials/*.json`);
-- bloqueio de SQL não-parametrizada em `app/tools/` e no cliente BigQuery;
+- bloqueio de SQL não-parametrizada em `app/core/analytics/queries.py` e no cliente BigQuery;
 - `ruff check` automático no arquivo Python recém-editado.
 
 Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
@@ -237,13 +249,11 @@ Detalhe em [`CLAUDE.md`](CLAUDE.md) (seção *Harness do Claude Code*).
 
 ```text
 app/
-  clients/      # BigQuery client e erros de infraestrutura
-  graph/        # llm_router, date_normalizer, prompts, binding de tools, workflow LangGraph
-  schemas/      # contratos Pydantic
-  tools/        # queries SQL e analyzers
-  cli.py        # CLI conversacional
-  main.py       # API FastAPI
-  verify.py     # gate local sem testes
+  agent/        # workflow LangGraph, nodes, state, prompts, tools, studio
+  api/          # FastAPI, SSE, observabilidade, schemas HTTP
+  cli/          # CLI conversacional
+  core/         # lógica pura: datas, router, analytics (models, queries, analyzers)
+  infra/        # BigQuery, LLMs e settings
 tests/
   unit/
   integration/
@@ -251,8 +261,10 @@ tests/
   readiness/
   eval/         # eval harness do router LLM (accuracy por campo)
 scripts/
+  verify.py               # gate local: ruff + compileall + pyright
   run_local_chat.sh       # sobe API + abre CLI com --debug
   run_readiness_checks.sh
+  eval_router_langsmith.py
 .claude/
   hooks/        # guardrails de desenvolvimento (segredos, SQL, ruff)
 ```
