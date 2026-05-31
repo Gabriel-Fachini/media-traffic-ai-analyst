@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi import Body, Depends, FastAPI, Header
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langgraph.types import Command
 from pydantic import BaseModel, ValidationError
 
@@ -23,6 +23,8 @@ from app.graph.llm import LlmTimeoutError
 from app.graph.workflow import (
     TEMPORARY_TOOL_FAILURE_MESSAGE,
     ToolExecutionError,
+    content_to_text,
+    get_current_turn_messages,
     get_persistent_analytics_graph,
 )
 from app.schemas import (
@@ -87,7 +89,7 @@ def _extract_agent_tool_calls(state: AnalyticsGraphState) -> list[AgentToolCall]
     """Extract all tool_calls emitted by the LLM agent in the current state."""
     calls: list[AgentToolCall] = []
     seen: set[str] = set()
-    for message in _get_current_turn_messages(state):
+    for message in get_current_turn_messages(state):
         if not isinstance(message, AIMessage) or not message.tool_calls:
             continue
         for tc in message.tool_calls:
@@ -102,25 +104,6 @@ def _extract_agent_tool_calls(state: AnalyticsGraphState) -> list[AgentToolCall]
                 )
             )
     return calls
-
-
-def _get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
-    """Return only the messages that belong to the current turn.
-
-    The graph persists the whole thread history, but debug and observability for
-    `X-Debug` should describe the current turn only. The workflow already marks
-    the current turn start via `turn_start_index`, so the API layer reuses it.
-    """
-    messages = state.get("messages", [])
-    if not isinstance(messages, list):
-        return []
-
-    raw_turn_start_index = state.get("turn_start_index", 0)
-    turn_start_index = (
-        raw_turn_start_index if isinstance(raw_turn_start_index, int) else 0
-    )
-    bounded_turn_start_index = max(0, min(turn_start_index, len(messages)))
-    return cast(list[AnyMessage], messages[bounded_turn_start_index:])
 
 
 def _build_turn_observability(
@@ -146,7 +129,7 @@ def _extract_turn_observability_from_state(
     latency_ms: int | None,
 ) -> TurnObservability:
     """Aggregate latency, token usage, and tool usage from the current turn state."""
-    current_turn_messages = _get_current_turn_messages(state)
+    current_turn_messages = get_current_turn_messages(state)
     llm_call_count = 0
     input_tokens = 0
     output_tokens = 0
@@ -319,26 +302,6 @@ def _format_sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {payload}\n\n"
 
 
-def _message_content_to_text(content: Any) -> str:
-    """Normalize LangChain message content payloads into plain text."""
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-                continue
-            if isinstance(item, dict):
-                text = item.get("text")
-                if text:
-                    parts.append(str(text))
-        return "".join(parts)
-
-    return str(content)
-
-
 def _extract_router_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any] | None:
     """Project LangGraph preprocess events into the public `router` SSE payload.
 
@@ -390,7 +353,7 @@ def _extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any
         if isinstance(chunk, AIMessageChunk):
             if chunk.tool_call_chunks or chunk.tool_calls:
                 return None
-            text_delta = _message_content_to_text(chunk.content)
+            text_delta = content_to_text(chunk.content)
             if text_delta.strip():
                 return {"text_delta": text_delta}
         return None
@@ -414,7 +377,7 @@ def _extract_agent_token_sse_payload(raw_event: dict[str, Any]) -> dict[str, Any
     if not isinstance(last_message, AIMessage) or last_message.tool_calls:
         return None
 
-    content = _message_content_to_text(last_message.content).strip()
+    content = content_to_text(last_message.content).strip()
     if not content:
         return None
 

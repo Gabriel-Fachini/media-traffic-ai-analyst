@@ -28,7 +28,6 @@ from tests.fakes import (
     FakeAgentLLM,
     FakeAnalyticsTools,
     FakeRouterRunnable,
-    FakeSynthesisLLM,
     build_deterministic_graph_bundle,
 )
 
@@ -581,11 +580,9 @@ class ParaphrasedAmbiguousMetricClarifyingAgentLLM(FakeAgentLLM):
 
 def test_graph_merges_short_reply_after_agent_opened_clarification() -> None:
     clarifying_agent_llm = ClarifyingAgentLLM()
-    synthesis_llm = FakeSynthesisLLM()
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
         agent_llm=clarifying_agent_llm,
-        response_llm=synthesis_llm,
         router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),
@@ -642,11 +639,9 @@ def test_graph_merges_metric_choice_after_agent_opened_ambiguous_analytics_clari
 
 def test_graph_merges_metric_choice_after_paraphrased_agent_clarification() -> None:
     clarifying_agent_llm = ParaphrasedAmbiguousMetricClarifyingAgentLLM()
-    synthesis_llm = FakeSynthesisLLM()
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
         agent_llm=clarifying_agent_llm,
-        response_llm=synthesis_llm,
         router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),

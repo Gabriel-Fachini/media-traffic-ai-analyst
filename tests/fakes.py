@@ -348,7 +348,7 @@ class FakeAgentLLM:
 
 @dataclass
 class FakeSynthesisLLM:
-    """Plain LLM fake used by the insight_synthesizer (follow-ups only)."""
+    """Plain LLM fake for synthesis/follow-up paths (no tool calls)."""
 
     prompts: list[str] = field(default_factory=list)
 
@@ -573,7 +573,6 @@ def build_deterministic_graph_bundle() -> DeterministicGraphBundle:
     fake_tools = FakeAnalyticsTools()
     graph = build_analytics_graph(
         agent_llm=fake_agent_llm,
-        response_llm=fake_synthesis_llm,
         router_llm=FakeRouterRunnable(),
         tools=fake_tools.build(),
         checkpointer=MemorySaver(),

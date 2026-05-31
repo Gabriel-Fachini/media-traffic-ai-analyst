@@ -81,7 +81,7 @@ class QueryMetadata(BaseModel):
 class DebugError(BaseModel):
     """Structured debug error emitted by the graph or API."""
 
-    source: Literal["agent", "tool_executor", "insight_synthesizer", "api"] = Field(
+    source: Literal["agent", "tool_executor", "api"] = Field(
         description="Origem do erro tecnico capturado no fluxo."
     )
     message: str = Field(description="Mensagem tecnica resumida para diagnostico.")

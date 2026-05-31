@@ -109,7 +109,7 @@ class ToolExecutionError(RuntimeError):
         self.resolved_question = resolved_question
 
 
-def _content_to_text(content: Any) -> str:
+def content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content
 
@@ -203,7 +203,7 @@ def _build_agent_llm_input(
     agent_system_prompt: str,
 ) -> tuple[list[AnyMessage], list[AnyMessage]]:
     """Assemble the LLM input and current-turn history for one agent step."""
-    current_turn_messages = _get_current_turn_messages(state)
+    current_turn_messages = get_current_turn_messages(state)
     resolved_question = _resolve_effective_question(state)
     router_decision = _deserialize_router_decision(state.get("router_decision"))
     if resolved_question:
@@ -232,7 +232,7 @@ def _build_agent_error_command(
     exc: Exception,
 ) -> Command[Literal["tool_executor", "__end__"]]:
     """Convert unexpected agent failures into the graph's safe final state."""
-    current_turn_messages_for_error = _get_current_turn_messages(state)
+    current_turn_messages_for_error = get_current_turn_messages(state)
     tools_used = _collect_tools_used(current_turn_messages_for_error)
     return Command(
         update={
@@ -264,7 +264,7 @@ def _build_agent_response_command(
 
     all_turn_messages = list(current_turn_messages) + [response]
     tools_used = _collect_tools_used(all_turn_messages)
-    final_text = _content_to_text(response.content).strip()
+    final_text = content_to_text(response.content).strip()
     return Command(
         update={
             "messages": [response],
@@ -282,7 +282,7 @@ def _resolve_question(state: AnalyticsGraphState) -> str:
 
     for message in reversed(state.get("messages", [])):
         if isinstance(message, HumanMessage):
-            content = _content_to_text(message.content).strip()
+            content = content_to_text(message.content).strip()
             if content:
                 return content
 
@@ -315,7 +315,7 @@ def _is_successful_tool_message(message: AnyMessage) -> bool:
 def _get_last_human_question(messages: list[AnyMessage]) -> str:
     for message in reversed(messages):
         if isinstance(message, HumanMessage):
-            question = _content_to_text(message.content).strip()
+            question = content_to_text(message.content).strip()
             if question:
                 return question
     return ""
@@ -327,7 +327,7 @@ def _resolve_turn_start_index(state: AnalyticsGraphState) -> int:
 
     if explicit_question:
         if messages and isinstance(messages[-1], HumanMessage):
-            last_human_content = _content_to_text(messages[-1].content).strip()
+            last_human_content = content_to_text(messages[-1].content).strip()
             if last_human_content == explicit_question:
                 return len(messages) - 1
         return len(messages)
@@ -339,7 +339,7 @@ def _resolve_turn_start_index(state: AnalyticsGraphState) -> int:
     return len(messages)
 
 
-def _get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
+def get_current_turn_messages(state: AnalyticsGraphState) -> list[AnyMessage]:
     messages = list(state.get("messages", []))
     turn_start_index = state.get("turn_start_index", _resolve_turn_start_index(state))
     bounded_start_index = max(0, min(turn_start_index, len(messages)))
@@ -357,7 +357,7 @@ def _build_turn_question_messages(state: AnalyticsGraphState) -> list[HumanMessa
 
     if explicit_question:
         if isinstance(last_message, HumanMessage):
-            last_human_content = _content_to_text(last_message.content).strip()
+            last_human_content = content_to_text(last_message.content).strip()
             if last_human_content == explicit_question:
                 return []
         return [HumanMessage(content=explicit_question)]
@@ -410,18 +410,18 @@ def _build_strategy_follow_up_context(state: AnalyticsGraphState) -> str | None:
         previous_turn_messages
         and isinstance(previous_turn_messages[0], HumanMessage)
     ):
-        previous_question = _content_to_text(previous_turn_messages[0].content).strip()
+        previous_question = content_to_text(previous_turn_messages[0].content).strip()
 
     previous_answer = ""
     for message in reversed(previous_turn_messages):
         if not isinstance(message, AIMessage):
             continue
-        previous_answer = _content_to_text(message.content).strip()
+        previous_answer = content_to_text(message.content).strip()
         if previous_answer:
             break
 
     tool_context_blocks = [
-        f"Tool: {message.name}\nResultado:\n{_content_to_text(message.content)}"
+        f"Tool: {message.name}\nResultado:\n{content_to_text(message.content)}"
         for message in previous_turn_messages
         if _is_successful_tool_message(message)
     ]
@@ -635,10 +635,33 @@ def _resolve_router_turn(
 
 def _count_agent_iterations_in_turn(state: AnalyticsGraphState) -> int:
     """Count how many times the agent node has run in the current turn."""
-    current_turn_messages = _get_current_turn_messages(state)
+    current_turn_messages = get_current_turn_messages(state)
     return sum(
         1 for msg in current_turn_messages
         if isinstance(msg, AIMessage) and msg.tool_calls
+    )
+
+
+def _build_iteration_limit_command(
+    state: AnalyticsGraphState,
+) -> Command[Literal["tool_executor", "__end__"]]:
+    current_turn_messages = get_current_turn_messages(state)
+    tools_used = _collect_tools_used(current_turn_messages)
+    return Command(
+        update={
+            "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
+            "tools_used": tools_used,
+            "debug_errors": [
+                _build_debug_error(
+                    "agent",
+                    message=(
+                        f"Limite de {_MAX_AGENT_ITERATIONS} iteracoes atingido "
+                        "no loop agent/tool."
+                    ),
+                )
+            ],
+        },
+        goto="__end__",
     )
 
 
@@ -646,14 +669,11 @@ def build_analytics_graph(
     settings: Settings | None = None,
     *,
     agent_llm: Any | None = None,
-    response_llm: Any | None = None,
     router_llm: Any | None = None,
     tools: tuple[BaseTool, ...] | None = None,
     checkpointer: BaseCheckpointSaver | bool | None = None,
 ) -> Any:
     analytics_tools = tools or get_analytics_tools()
-    # agent_llm: LLM with tools bound — drives tool calling decisions.
-    # response_llm is retained for API compatibility during the workflow transition.
     resolved_agent_llm = agent_llm or build_tool_enabled_llm(settings)
     tools_by_name: dict[str, BaseTool] = {tool.name: tool for tool in analytics_tools}
     agent_system_prompt = build_conversation_system_prompt()
@@ -711,27 +731,8 @@ def build_analytics_graph(
         state: AnalyticsGraphState,
     ) -> Command[Literal["tool_executor", "__end__"]]:
         """Synchronous agent path used by `invoke()` based executions."""
-        # Safety guard: prevent runaway loops.
-        iterations = _count_agent_iterations_in_turn(state)
-        if iterations >= _MAX_AGENT_ITERATIONS:
-            current_turn_messages = _get_current_turn_messages(state)
-            tools_used = _collect_tools_used(current_turn_messages)
-            return Command(
-                update={
-                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-                    "tools_used": tools_used,
-                    "debug_errors": [
-                        _build_debug_error(
-                            "agent",
-                            message=(
-                                f"Limite de {_MAX_AGENT_ITERATIONS} iteracoes atingido "
-                                "no loop agent/tool."
-                            ),
-                        )
-                    ],
-                },
-                goto="__end__",
-            )
+        if _count_agent_iterations_in_turn(state) >= _MAX_AGENT_ITERATIONS:
+            return _build_iteration_limit_command(state)
 
         llm_input, current_turn_messages = _build_agent_llm_input(
             state,
@@ -757,27 +758,8 @@ def build_analytics_graph(
         config: RunnableConfig | None = None,
     ) -> Command[Literal["tool_executor", "__end__"]]:
         """LLM agent that decides which tool to call, then synthesizes the final answer."""
-        # Safety guard: prevent runaway loops.
-        iterations = _count_agent_iterations_in_turn(state)
-        if iterations >= _MAX_AGENT_ITERATIONS:
-            current_turn_messages = _get_current_turn_messages(state)
-            tools_used = _collect_tools_used(current_turn_messages)
-            return Command(
-                update={
-                    "final_answer": TEMPORARY_LLM_FAILURE_MESSAGE,
-                    "tools_used": tools_used,
-                    "debug_errors": [
-                        _build_debug_error(
-                            "agent",
-                            message=(
-                                f"Limite de {_MAX_AGENT_ITERATIONS} iteracoes atingido "
-                                "no loop agent/tool."
-                            ),
-                        )
-                    ],
-                },
-                goto="__end__",
-            )
+        if _count_agent_iterations_in_turn(state) >= _MAX_AGENT_ITERATIONS:
+            return _build_iteration_limit_command(state)
 
         llm_input, current_turn_messages = _build_agent_llm_input(
             state,
@@ -982,6 +964,8 @@ __all__ = [
     "ToolExecutionError",
     "UNSUPPORTED_DIMENSION_MESSAGE",
     "build_analytics_graph",
+    "content_to_text",
+    "get_current_turn_messages",
     "get_persistent_analytics_graph",
     "astream_analytics_graph_events",
     "invoke_analytics_graph",

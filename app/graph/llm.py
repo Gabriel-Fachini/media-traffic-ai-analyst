@@ -24,7 +24,7 @@ class LlmTimeoutError(RuntimeError):
         self,
         message: str,
         *,
-        source: str = "insight_synthesizer",
+        source: str = "agent",
         error_type: str | None = None,
         debug_message: str | None = None,
     ) -> None:
